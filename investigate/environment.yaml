@@ -21,6 +21,9 @@ dependencies:
   - matplotlib-base>=3.4
   - statsmodels>=0.13
   - numba>=0.57
+  
+  # clustermap heatmaps for the Figure 1B clustering
+  - seaborn>=0.12
 
   - pip
   - pip:

@@ -138,6 +138,7 @@ def main():
 
     counts.to_csv(OUT_DIR / "raw_counts.tsv", sep="\t")
     normed.round(0).astype("Int64").to_csv(OUT_DIR / "normalized_counts.tsv", sep="\t")
+    fitness_scores(normed).to_csv(OUT_DIR / "fitness_scores_no_imputed.tsv", sep="\t")
     avg_fitness_scores(normed).round(4).to_csv(OUT_DIR / "avg_log2_fitness_scores_no_imputation.tsv", sep="\t")
     
     counts_imp = impute(counts, normed)
@@ -147,6 +148,7 @@ def main():
     normed_imp.round(0).astype("Int64").to_csv(OUT_DIR / "normalized_counts_imputed.tsv", sep="\t")
     # TODO can we remove all the rows that are all empty from the avg_log2_fitness_scores_imputed.tsv
 
+    fitness_scores(normed_imp).to_csv(OUT_DIR / "fitness_scores_imputed.tsv", sep="\t")
     avg_fitness_scores(normed_imp).round(4).to_csv(OUT_DIR / "avg_log2_fitness_scores_imputed.tsv", sep="\t")
 
 

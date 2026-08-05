@@ -1,0 +1,27 @@
+# conda env create -f environment.yaml
+# conda activate go
+#
+# Rebuild after editing:
+#   conda env update -f environment.yaml --prune
+
+name: go
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.11
+
+  - numpy>=1.21
+  - pandas>=1.3
+
+  # edgepython dependencies, installed via conda so the compiled ones
+  # (numba/llvmlite) resolve cleanly rather than through pip wheels
+  - scipy>=1.7
+  - matplotlib-base>=3.4
+  - statsmodels>=0.13
+  - numba>=0.57
+
+  - pip
+  - pip:
+      - edgepython>=0.2.6

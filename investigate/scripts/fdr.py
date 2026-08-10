@@ -31,8 +31,8 @@ SCORES_FILE = OUT_DIR / "avg_log2_fitness_scores_imputed.tsv"
 
 def edger_strain(counts, gen0_cols, gen10_cols):
     """
-    Fit ~generation for one strain. 
-    Returns logFC/logCPM/LR/PValue/FDR by gene.
+    Fit per strain. 
+    Returns FDR by gene (and logFC/logCPM/LR/PValue).
     """
     cols = list(gen0_cols) + list(gen10_cols)
     mat = counts[cols].values.astype(float) # integer count matrix (genes x samples)
@@ -52,7 +52,7 @@ def edger_strain(counts, gen0_cols, gen10_cols):
     fit = ep.glm_fit(y, design) # fitting of the negative binomial model to the count data
     lrt = ep.glm_lrt(fit, coef=1) # hypothesis testing 
 
-    table = ep.top_tags(lrt, n=mat.shape[0])["table"] # turns the raw p-values into a usable results table
+    table = ep.top_tags(lrt, n=mat.shape[0], adjust_method='BH')["table"] # turns the raw p-values into a usable results table using the Benjamini & Hochberg (BH) FDR method
     table.index = counts.index[table.index] # pull out those gene names in that order
     return table
 
@@ -80,11 +80,11 @@ def main():
 
         out[f"{yeast_strain}_Avg_log2_Fitness_Score"] = avg[f"{yeast_strain}_Avg_log2_Fitness_Score"]
         out[f"{yeast_strain}_FDR"] = res["FDR"]
-        print(f"{yeast_strain:14s} {int((res['FDR'] < FDR_CUTOFF).sum()):5d} genes at FDR < {FDR_CUTOFF}")
+        # print(f"{yeast_strain:14s} {int((res['FDR'] < FDR_CUTOFF).sum()):5d} genes at FDR < {FDR_CUTOFF}")
 
     table = pd.DataFrame(out)
     table.index.name = "gene"
-    table.to_csv(OUT_DIR / "moby_fitness_and_fdr.tsv", sep="\t")
+    table.to_csv(OUT_DIR / "fitness_and_fdr.tsv", sep="\t")
 
 if __name__ == "__main__":
     main()

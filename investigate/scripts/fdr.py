@@ -1,16 +1,11 @@
 """
-edgeR step of the Moby analysis, run with Python via edgePython.
+edgeR step of the analysis, run with Python via edgePython.
 
+From paper:
 Measured and imputed data were analyzed using edgeR version
 3.22.1, using a linear model with generation (0 or 10) as a factor. Genes whose
 barcodes were significantly different after 10 generations of growth in each
 strain at an FDR<0.05 were taken as significant (Benjamini and Hochberg, 1995).
-
-One negative binomial GLM per gene per strain:
-
-    log(expected count) = b0 + b1 * [generation == 10] + log(library size)
-
-
 """
 
 import warnings

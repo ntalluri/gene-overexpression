@@ -43,6 +43,7 @@ def commonly_deleterious(path=FITNESS_FILE, min_strains=10, fdr_cutoff=0.05):
     n = deleterious.sum(axis=1)
     return n[n >= min_strains].sort_values(ascending=False).rename_axis("Commonly Deleterious Genes").rename("# strains where deleterious")
 
+
 def strain_specific(path=FITNESS_FILE, max_strains=3, fdr_cutoff=0.05):
     """
     To be strain-specific deleterious or strain-specific beneficial, the gene can only be in max 3 strains
@@ -53,11 +54,13 @@ def strain_specific(path=FITNESS_FILE, max_strains=3, fdr_cutoff=0.05):
     rare_ben = beneficial.sum(axis=1) <= max_strains
     return deleterious.mul(rare_del, axis=0), beneficial.mul(rare_ben, axis=0)
 
+
 def as_gene_columns(mask, suffix):
     """
     Boolean frame -> one column of gene names per strain
     """
     return pd.DataFrame({f"{s}_{suffix}_Genes": pd.Series(mask.index[mask[s]].tolist()) for s in mask.columns})
+
 
 # find the commonly deleterious genes between the strains
 cd = commonly_deleterious()
@@ -93,27 +96,26 @@ def compare_lists(mine, supp):
     """
     Per-strain overlap between my gene columns and the supplement's.
     """
-    COUNT_COLS = ["mine", "supp", "overlap", "mine_only", "supp_only"]
+    COUNT_COLS = ["mine", "supp", "overlap"]
     rows = []
     for col in mine.columns:
         strain = col.split("_")[0]
         m = set(mine[col].dropna())
         
         if col not in supp.columns:
-            rows.append({"strain": strain, "mine": len(m), "supp": None, "overlap": None,
-                         "mine_only": None, "supp_only": None, "jaccard": None})
+            rows.append({"strain": strain, "mine": len(m), "supp": None, "overlap": None, "jaccard": None})
             continue
         
         s = set(supp[col].dropna())
         ov = m & s
-        rows.append({"strain": strain, "mine": len(m), "supp": len(s), "overlap": len(ov),
-                     "mine_only": len(m - s), "supp_only": len(s - m), "jaccard": round(len(ov) / len(m | s), 3)})
+        rows.append({"strain": strain, "mine": len(m), "supp": len(s), "overlap": len(ov), "jaccard": round(len(ov) / len(m | s), 3)})
     
     df = pd.DataFrame(rows).set_index("strain")
     df[COUNT_COLS] = df[COUNT_COLS].astype("Int64")
     df["jaccard"] = df["jaccard"].round(3)
     return df
     
+
 supp_del = pd.read_csv(SUPP_SSDEL_GENES, header=0, sep=",")
 supp_ben = pd.read_csv(SUPP_SSBEN_GENES, header=0, sep=",")
 ss_del = as_gene_columns(ss_del, "Deleterious")

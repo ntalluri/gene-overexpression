@@ -24,7 +24,7 @@ COUNTS_FILE = OUT_DIR / "normalized_counts_imputed.tsv" # I think this is what t
 SCORES_FILE = OUT_DIR / "avg_log2_fitness_scores_imputed.tsv"
 
 
-def edger_strain(counts, gen0_cols, gen10_cols):
+def fdr_strain(counts, gen0_cols, gen10_cols):
     """
     Fit per strain. 
     Returns FDR by gene (and logFC/logCPM/LR/PValue).
@@ -69,7 +69,7 @@ def main():
     out = {}
     for strain, gens in sorted(sample_groups(counts_imp.columns).items()):
         
-        res = edger_strain(counts_imp, gens["Gen0"], gens["Gen10"])
+        res = fdr_strain(counts_imp, gens["Gen0"], gens["Gen10"])
         
         yeast_strain = strain.split("_")[0]
 

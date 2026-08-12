@@ -1,4 +1,4 @@
-# Recreating work from "Natural variation in the consequences of gene overexpression and its implications for evolutionary trajectories"
+# Code work from "Natural variation in the consequences of gene overexpression and its implications for evolutionary trajectories"
 
 # Overview 
 

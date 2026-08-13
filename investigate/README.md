@@ -118,8 +118,11 @@ YPS606 has no entry in the supplement, so overlap and Jaccard are undefined.
 | YPS606     |   58 |  n/a |     n/a |     n/a |
 
 
-
-
 # Hierachial clustering
 
+I tried to recreate the heatmaps and clustering that was done in the paper
+
 ## Notes
+
+I didn't use the same code that was done in the paper, but from the figures I made, they seem similar. 
+- I wasn't sure how the Imputed Defects were defined so I left those out

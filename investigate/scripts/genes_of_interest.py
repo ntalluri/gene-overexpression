@@ -130,3 +130,7 @@ stats_ben.to_csv(GOI_DIR/"compare_strain_specific_beneficial_to_supplement_stats
 
 stats_del = compare_lists(ss_del, supp_del) 
 stats_del.to_csv(GOI_DIR/"compare_strain_specific_deleterious_to_supplement_stats.csv", sep = "\t")
+
+# TODO: add a visulization of the number of genes affected per strain (deleterious and benefical)
+# TODO: also do the distribution of the log fitness scores for those deleterious and beneficial scores per strain
+# TODO: also  do the distribusion of the 431 commonly feleterious genes per strain

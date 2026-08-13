@@ -9,7 +9,11 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 GOI_DIR = OUT_DIR / "genes_of_interest"
 GOI_DIR.mkdir(parents=True, exist_ok=True)
 
-FITNESS_FILE = OUT_DIR / "fitness_and_fdr.tsv"
+FITNESS_FILE = OUT_DIR / "fitness_and_fdr.tsv" 
+
+# uncomment to use the data from supplement 4 instead of my analysis
+# FITNESS_FILE = RAW_DIR / "Fitness_Scores_Imputed.tsv" 
+
 SUPP_CD_GENES = RAW_DIR / "Commonly-Deleterious-Genes.csv"
 SUPP_SSBEN_GENES = RAW_DIR / "Strain-Specific-Beneficial.csv"
 SUPP_SSDEL_GENES = RAW_DIR / "Strain-Specific-Deleterious.csv"

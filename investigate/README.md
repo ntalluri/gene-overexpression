@@ -48,7 +48,7 @@ I then compared the data I got to what is shown in supplement 4
 
 ### Commonly deleterious genes
 
-Comparison of my commonly deleterious calls against the paper's supplement,
+Comparison of my commonly deleterious genes found against the paper's supplement,
 split by whether the two sources report the same number of affected strains.
 
 | Category                   | Strain count flag: False | Strain count flag: True |
@@ -57,10 +57,11 @@ split by whether the two sources report the same number of affected strains.
 | `supp_cd` (supplement only)|                        0 |                     110 |
 | `both`                     |                      161 |                     160 |
 
-- 19 genes are called only by me and do not appear in the supplement.
+- 19 genes are found only by me and do not appear in the supplement.
 - 110 genes appear in the supplement but are not recovered by my analysis.
-- Those 160 genes are the set where my results and the paper agree on both the
-  gene call and the strain count.
+- The 160 genes are the set where my results and the paper agree on both the
+  genes chosen and the strain count. The 161 genes found are the set where my results and the paper agree on both the
+  genes chosen but do not aggree on the strain count.
 - The strain count flag is only interpretable for the `both` row. Genes present
   in a single source have nothing to compare against, so they fall entirely on
   one side of the split by construction.
@@ -69,9 +70,9 @@ split by whether the two sources report the same number of affected strains.
 
 Column definitions for both tables below:
 
-- `mine`: strain-specific genes called by my analysis
+- `mine`: strain-specific genes found by my analysis
 - `supp`: strain-specific genes reported in the paper's supplement
-- `overlap`: genes called by both
+- `overlap`: genes found by both
 - `jaccard`: `overlap / (mine + supp - overlap)`
 
 YPS606 has no entry in the supplement, so overlap and Jaccard are undefined.
@@ -111,8 +112,13 @@ YPS606 has no entry in the supplement, so overlap and Jaccard are undefined.
 | YJM1273    |  258 |  155 |      98 |   0.311 |
 | YJM1389    |  356 |  413 |      83 |   0.121 |
 | YJM1592    |   58 |   23 |      19 |   0.306 |
-| YJM978     |  115 |   44 |      32 |   0.252 |
-| YPS128     |  185 |   92 |
+| YJM978     |  115 |   44 |      32 |   0.265 |
+| YPS128     |  185 |   92 |      58 |   0.252 |
+| YPS163     |  404 |  232 |     160 |   0.336 |
+| YPS606     |   58 |  n/a |     n/a |     n/a |
+
+
+
 
 # Hierachial clustering
 

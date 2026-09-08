@@ -128,11 +128,11 @@ def avg_fitness_scores(normed):
 def main():
 
     # to use the raw barseq data (lanes) from https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE171586
-    counts = sum_lanes([RAW_DIR / f for f in LANE_FILES])
-    counts = counts.drop(columns=[c for c in EXCLUDE if c in counts.columns])
+    # counts = sum_lanes([RAW_DIR / f for f in LANE_FILES])
+    # counts = counts.drop(columns=[c for c in EXCLUDE if c in counts.columns])
 
     # to use the raw counts directly from supplemnt 4 
-    # counts = pd.read_csv(RAW_DIR / "Unnormalized-Read-Counts.csv", sep=",", header=0, index_col="gene")
+    counts = pd.read_csv(RAW_DIR / "Unnormalized-Read-Counts.csv", sep=",", header=0, index_col="gene")
   
     normed = cpm(counts)
 

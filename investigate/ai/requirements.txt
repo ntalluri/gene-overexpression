@@ -1,0 +1,22 @@
+# Core pipeline
+pandas>=2.0
+numpy>=1.24
+scipy>=1.10
+openpyxl>=3.1        # reading the eLife supplementary xlsx files
+
+# Statistical regression tests (src/test_statistics.py) use this as the
+# reference implementation. Also used by step10's dispersion checks.
+statsmodels>=0.14
+
+# Figures (src/plots.py)
+matplotlib>=3.7
+
+# Recommended statistics backend for steps 05 and 10: a pure-Python port of
+# edgeR (pachterlab/edgePython). Without it the built-in 'python' backend is
+# used, which matches on point estimates but only approximates edgeR's
+# dispersion moderation.
+edgepython>=0.2
+
+# Optional: only needed for --backend edger in steps 05 and 10
+# rpy2>=3.5
+# and in R:  BiocManager::install("edgeR")

@@ -1,0 +1,73 @@
+{
+  "_comment": "All paths are relative to the project root. Every parameter that the paper states explicitly is annotated with where it comes from.",
+  "paths": {
+    "raw_dir": "data/raw",
+    "decode_file": "data/reference/GENE_UPTAG_Decode.txt",
+    "sample_sheet": "data/reference/samples.tsv",
+    "external_dir": "data/external",
+    "results_dir": "results",
+    "counts_dir": "results/01_counts",
+    "normalized_dir": "results/02_normalized",
+    "imputed_dir": "results/03_imputed",
+    "fitness_dir": "results/04_fitness",
+    "gene_lists_dir": "results/05_gene_lists",
+    "analysis_dir": "results/06_analyses"
+  },
+  "counting": {
+    "_comment": "uptag_offset 28 is the value hard-coded in the original BarSeq.py (the uptag begins at base 29). Confirm it for your FASTQs with step01 before relying on it. The fuzzy slide values reproduce the original 25-30 search window.",
+    "uptag_offset": 28,
+    "fuzzy_slide_back": 3,
+    "fuzzy_slide_forward": 2
+  },
+  "imputation": {
+    "_comment": "Paper: genes with at least 20 normalized read counts in all three replicates of the starting pool but missing reads at 10 generations receive a pseudocount of 1 on the raw reads.",
+    "gen0_min_normalized": 20,
+    "pseudocount": 1,
+    "endpoint_rule": "all_zero"
+  },
+  "statistics": {
+    "_comment": "Paper: edgeR with generation as a factor, BH FDR < 0.05.",
+    "fdr_alpha": 0.05,
+    "no_effect_fdr": 0.1,
+    "prior_df": 10.0,
+    "trend_span": 0.3,
+    "dispersion_type": "tagwise",
+    "_backend_comment": "Recommended backend for steps 05 and 10 is 'edgepython' (pip install edgepython), a pure-Python edgeR port. 'python' is the built-in no-dependency fallback; 'edger' calls real edgeR via rpy2. Pass --backend on the CLI.",
+    "backend": "edgepython"
+  },
+  "gene_lists": {
+    "_comment": "Paper: commonly deleterious = significant defect in at least 66% of 15 strains, i.e. 10. Strain-specific = significant in one strain and not more than two others.",
+    "common_min_strains": 10,
+    "max_other_strains": 2,
+    "specificity_rule": "same_direction",
+    "gen0_measured_min_normalized": 0,
+    "exclude_from_strain_specific": [
+      "YPS606"
+    ]
+  },
+  "reference_values": {
+    "_comment": "Numbers reported in the paper, used by the pipeline to print sanity checks. Not used in any calculation.",
+    "n_strains": 15,
+    "genes_significant_any_strain": 4064,
+    "median_significant_per_strain": 1726,
+    "commonly_deleterious": 431,
+    "deleterious_Y2209": 635,
+    "deleterious_Y12": 3060,
+    "strain_specific_Y2209": 41,
+    "strain_specific_Y12": 1763,
+    "median_reads_per_barcode_sample": 7570975,
+    "replicate_correlation_range": [
+      0.74,
+      0.89
+    ],
+    "low_correlation_strains": [
+      "Y2209",
+      "YJM1592",
+      "YJM978"
+    ],
+    "low_correlation_range": [
+      0.55,
+      0.65
+    ]
+  }
+}

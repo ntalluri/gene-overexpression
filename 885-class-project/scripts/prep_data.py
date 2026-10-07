@@ -19,4 +19,10 @@ print(long_fs_df)
 long_fs_df.to_csv("data/oe/prepped/long_fitness_scores.csv", sep="\t", header=True, index=False)
 
 
+# print(fs_df.shape)                                  # genes x strains
+# print(fs_df.isna().sum())                           # missing cells per strain
+# print(fs_df.size, len(long_fs_df))                  # cells before vs rows after dropna
+# print(fs_df.index.duplicated().sum())               # duplicate UIDs
+# print(fs_df.dtypes.value_counts())                  # should all be float64
+# print(long_fs_df.groupby("strain").size())          # rows per strain
 

@@ -8,6 +8,7 @@ name: go
 
 channels:
   - conda-forge
+  # - bioconda            # snakemake
 
 dependencies:
   - python=3.11
@@ -21,9 +22,16 @@ dependencies:
   - matplotlib-base>=3.4
   - statsmodels>=0.13
   - numba>=0.57
-  
+
   # clustermap heatmaps for the Figure 1B clustering
   - seaborn>=0.12
+
+  # OE fitness modeling
+  - scikit-learn>=1.7   # LinearRegression(tol=...) needs 1.7+
+
+  # pipeline (for later)
+  # - snakemake
+  # - pyyaml
 
   - pip
   - pip:

@@ -55,6 +55,13 @@ DELTA="${DELTA:-0.05}"           # -d: A multiplicative factor by how much the l
                                  # (as defined in the -s / –splits argument defined)
                                  # of the stratification can be exceeded. Default is 0.05
 
+NUM_CLASSES="${NUM_CLASSES:-200}" # --e-num-classes: number of cluster groups DataSAIL
+                                 # condenses the entity clusters into before the ILP.
+                                 # Default in DataSAIL is 50; more groups = finer-grained
+                                 # units to move between splits, so sizes can land closer
+                                 # to the requested 0.7/0.15/0.15. Costs more ILP time.
+                                 # Irrelevant for TECH=R (no clustering), so only added below.
+
 
 echo "===== DataSAIL split job started ====="
 date; hostname; pwd
@@ -65,6 +72,7 @@ echo "Similarity source:  ${SIM}"
 echo "Split spec:         ${SPLIT_SPEC}"
 echo "Runs / epsilon:     ${RUNS} / ${EPSILON}"
 echo "Solver / timeout:   ${SOLVER} / ${TIMEOUT}s"
+echo "Cluster groups:     ${NUM_CLASSES} (--e-num-classes; DataSAIL default is 50)"
 
 command -v datasail >/dev/null 2>&1 || { echo "ERROR: datasail not on PATH." >&2; exit 127; }
 if [[ ! -s "${INPUT_FASTA}" ]]; then
@@ -134,6 +142,7 @@ CMD=(datasail
 # Similarity source only matters for identity/cluster techniques, not random.
 if [[ "${TECH}" != "R" ]]; then
     CMD+=(--e-sim "${SIM}")
+    CMD+=(--e-num-classes "${NUM_CLASSES}")
 fi
 
 echo; echo "===== Running DataSAIL ====="
@@ -163,7 +172,7 @@ printf '%q ' "${CMD[@]}"; echo
 #                          identity >= the lowest threshold, highest first.
 # Each check is also run on a random split of the same sizes, for comparison.
 # ---------------------------------------------------------------------------
-THRESHOLDS="${THRESHOLDS:-0.5}"   # identity cutoff(s), e.g. "0.3 0.5 0.7"
+THRESHOLDS="${THRESHOLDS:-0.3}"   # identity cutoff(s), in protien ml, .3 is used
 
 echo; echo "===== Evaluating leakage ====="
 echo "Leakage evaluation: starting"

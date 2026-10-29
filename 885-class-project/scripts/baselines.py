@@ -74,7 +74,6 @@ strain_mean = long.groupby("strain")["fitness_score"].transform("mean").to_numpy
 gene_mean = long.groupby("UID")["fitness_score"].transform("mean").to_numpy()
 additive = gene_mean + strain_mean - total_mean 
 
-
 # Total-mean model: y = w0 * 1
 # Every row gets the same input (1), so the model can only learn one constant.
 X_ones = np.ones((len(long), 1))  # bias column: all 1s
@@ -111,8 +110,8 @@ levels = strain_encoder.categories_[0]
 w = np.r_[0.0, m_str.coef_]  # reference strain has no column, so w = 0
 weights = pd.DataFrame({
     "strain": levels,
-    "w_g": w,
-    "w0 + w_g": m_str.intercept_ + w,
+    "w_s": w,
+    "w0 + w_s": m_str.intercept_ + w,
     "strain specific mean": long.groupby("strain")["fitness_score"].mean().reindex(levels).to_numpy(),
 })
 
@@ -126,8 +125,8 @@ gene_levels = gene_encoder.categories_[0]
 wg = np.r_[0.0, m_gen.coef_]  # reference gene has no column, so w = 0
 gene_weights = pd.DataFrame({
     "UID": gene_levels,
-    "w_s": wg,
-    "w0 + w_s": m_gen.intercept_ + wg,
+    "w_g": wg,
+    "w0 + w_g": m_gen.intercept_ + wg,
     "gene specific mean": long.groupby("UID")["fitness_score"].mean().reindex(gene_levels).to_numpy(),
 })
 print(f"\ngene linear regression model")
@@ -162,6 +161,8 @@ add_strain_weights = pd.DataFrame({
     "w_s": ws_add,
     "strain mean diff (strain - dropped)": s_means - s_means[0],  # equals w_s only if no cells are missing
 })
+
+
 add_gene_weights = pd.DataFrame({
     "UID": gene_levels,
     "w_g": wg_add,
@@ -172,3 +173,9 @@ print(f"w0 = {m_add.intercept_:.4f} (prediction for {gene_levels[0]} in {levels[
 print(add_strain_weights.to_string(index=False))
 print()
 print(add_gene_weights.head(10).to_string(index=False))
+
+# TODO: add in the random split for a train/val/test 
+# TODO: next step try to look at other ways to split the data
+# - then can try these baselines with the splits
+# TODO: try out regulizered models
+# - bayesion prior on 0's for regression models (interesting ideas)

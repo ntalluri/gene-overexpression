@@ -75,7 +75,7 @@ EVAL_SIM="${EVAL_SIM:-mmseqspp}" # similarity used by the CHECK (not by the spli
                                  #     random one.
 TRAIN_SET="${TRAIN_SET:-}"       # which split absorbs the leaking genes. Empty = the
                                  #     first name in --names, i.e. 'train'.
-BASELINE_REPS="${BASELINE_REPS:-5}"  # random splits to score for comparison. Each one
+BASELINE_REPS="${BASELINE_REPS:-1}"  # random splits to score for comparison. Each one
                                  #     reshuffles the first DataSAIL run's labels, so the
                                  #     set sizes are identical and only the similarity
                                  #     control is gone. 0 = skip the baseline.
@@ -178,36 +178,36 @@ printf '%q ' "${CMD[@]}"; echo
 # Threshold leakage check.
 #
 # Computes all-vs-all sequence identity ONCE with EVAL_SIM, then asks of every
-# split DataSAIL produced: which held-out genes have a close relative in the
-# TRAINING set? Paralogs from yeast's genome duplication can share sequence and
-# OE effects; with one copy in train and the other in test, a model can predict
-# the test gene from its copy.
-#
-# Held-out vs held-out similarity is NOT checked. A val gene resembling a test
-# gene is not leakage, since the model trains on neither.
+# split DataSAIL produced: which genes have a close relative in a DIFFERENT set?
+# Paralogs from yeast's genome duplication can share sequence and OE effects;
+# with one copy in train and the other in test, a model can predict the test
+# gene from its copy.
 #
 # Every DataSAIL run is scored, and so are BASELINE_REPS random splits of the
 # same set sizes. The random numbers are what the check would report with no
 # similarity control at all, so they are the yardstick for the real runs.
 #
 # Writes to ${OUTDIR}:
-#   leakage_threshold.tsv  COUNTS per held-out set: how many of its genes have a
-#                          training relative at identity >= threshold. One row
-#                          per run, DataSAIL runs and random baselines together,
-#                          so the comparison is a read down the 'kind' column.
+#   leakage_threshold.tsv  COUNTS per set pair: how many genes in the second set
+#                          have a relative in the first at identity >= threshold.
+#                          One row per run, DataSAIL runs and random baselines
+#                          together, so the comparison is a read down 'kind'.
 #   leakage_genes.tsv      the NAMED genes behind those counts, DataSAIL runs
-#                          only. One row per held-out gene with a training
-#                          relative: the set it sits in, how many relatives it
-#                          has, the highest identity, the closest training gene,
-#                          and the summed identity over threshold. These are the
-#                          genes to move into '${TRAIN_SET}'. Also copied into
-#                          each run's own dir.
+#                          only. One row per held-out gene with a cross-set
+#                          relative, carrying parallel comma-separated lists of
+#                          its relatives, their sets and their identities,
+#                          closest first. These are the genes to move into
+#                          '${TRAIN_SET}'. Also copied into each run's own dir.
 #   split_sizes.tsv        requested vs ACTUAL split sizes (cold splits move
 #                          whole clusters, so 0.7/0.15/0.15 is a target, not a
 #                          result), plus the sizes after moving every gene in
 #                          leakage_genes.tsv into '${TRAIN_SET}'.
-#   <run>/cross_set_pairs.tsv   every training/held-out gene pair at or above the
-#                          lowest threshold, highest identity first.
+#   <run>/*_splits_move_to_train.tsv   the run's own split table with those
+#                          genes reassigned to '${TRAIN_SET}'. Same ID/Split
+#                          columns and row order as DataSAIL's *_splits.tsv, so
+#                          it drops straight into whatever reads that file.
+#   <run>/cross_set_pairs.tsv   every cross-set gene pair at or above the lowest
+#                          threshold, highest identity first.
 #   pairwise_identity.tsv.gz    every non-zero gene pair and its identity, one
 #                          row per pair (SAVE_ALIGNMENTS=1).
 # ---------------------------------------------------------------------------
@@ -226,7 +226,7 @@ export DS_BASELINE_SEED="${BASELINE_SEED}"
 export DS_SAVE_ALIGNMENTS="${SAVE_ALIGNMENTS}"
 
 if python3 << 'PYEOF'
-import glob, os
+import glob, itertools, os
 from pathlib import Path
 
 import numpy as np
@@ -245,10 +245,7 @@ threads = int(os.environ["DS_THREADS"])
 baseline_reps = int(os.environ["DS_BASELINE_REPS"])
 baseline_seed = int(os.environ["DS_BASELINE_SEED"])
 save_alignments = os.environ["DS_SAVE_ALIGNMENTS"] == "1"
-# Only TRAINING vs held-out matters. A val gene that resembles a test gene is
-# not leakage: the model never sees either during training, so neither one can
-# be predicted from the other.
-pairs = [(train_name, b) for b in split_names if b != train_name]
+pairs = list(itertools.combinations(split_names, 2))   # train-val, train-test, val-test
 
 # ---------------------------------------------------------------------------
 # All-vs-all identity, computed once for every run.
@@ -302,7 +299,7 @@ if save_alignments:
 threshold_rows, gene_rows, size_rows = [], [], []
 
 
-def check_run(label, assign, kind, run_dir=None):
+def check_run(label, assign, kind, run_dir=None, split_file=None):
     """Score one split assignment.
 
     kind is 'datasail' or 'random'. Random baselines only contribute counts to
@@ -311,11 +308,8 @@ def check_run(label, assign, kind, run_dir=None):
     """
     lab = np.array([assign.get(n, "") for n in names])
     in_split = np.isin(lab, split_names)
-    is_train = lab == train_name
-    # True where one gene is in training and the other is held out. Held-out vs
-    # held-out pairs are ignored on purpose, see the note on `pairs` above.
-    cross = (is_train[:, None] != is_train[None, :]) \
-        & in_split[:, None] & in_split[None, :]
+    # True where two genes are in DIFFERENT splits (both actually assigned)
+    cross = (lab[:, None] != lab[None, :]) & in_split[:, None] & in_split[None, :]
 
     # --- counts per set pair ------------------------------------------------
     for a, b in pairs:
@@ -334,40 +328,54 @@ def check_run(label, assign, kind, run_dir=None):
     if run_dir is None:          # random baseline: counts only
         return
 
-    # --- every offending pair, training gene beside held-out gene -----------
+    # --- every offending pair ----------------------------------------------
     i, j = np.nonzero(np.triu((sym >= thresholds[0]) & cross, 1))
-    flip = ~is_train[i]                      # put the training gene in column 1
-    i, j = np.where(flip, j, i), np.where(flip, i, j)
-    pd.DataFrame({"train_gene": names[i],
-                  "heldout_gene": names[j], "heldout_set": lab[j],
+    pd.DataFrame({"gene_1": names[i], "set_1": lab[i],
+                  "gene_2": names[j], "set_2": lab[j],
                   "identity": np.round(sym[i, j], 4)}).sort_values(
         "identity", ascending=False).to_csv(
         run_dir / "cross_set_pairs.tsv", sep="\t", index=False)
 
     # --- which genes to move -----------------------------------------------
-    # Held-out genes with a training relative. Moving one into training removes
-    # the pair, so the held-out side is always the fixable one. Every relative
-    # counted here is in training, which is why no 'relative set' column exists.
+    # Only genes OUTSIDE the training set are listed: moving one of them into
+    # training removes the pair, so the held-out side is always the fixable one.
+    # relatives / relative_sets / identities are parallel lists, highest
+    # identity first, so position 1 in each is the same relative.
     flagged_by_threshold = {}
     for t in thresholds:
         hits = (sym >= t) & cross
-        masked = sym * hits                  # identities to training relatives only
+        masked = sym * hits                  # identities to cross-set relatives only
         n_relatives = hits.sum(axis=1)
-        closest = masked.argmax(axis=1)
         flagged = []
-        for k in np.nonzero((n_relatives > 0) & in_split & ~is_train)[0]:
+        for k in np.nonzero((n_relatives > 0) & in_split & (lab != train_name))[0]:
             flagged.append(str(names[k]))
+            rel = np.nonzero(hits[k])[0]
+            rel = rel[np.argsort(-sym[k, rel])]          # closest relative first
             gene_rows.append({
                 "run": label,
                 "threshold": t,
                 "gene": names[k],
                 "current_set": lab[k],
-                "n_train_relatives": int(n_relatives[k]),
-                "max_identity": round(float(masked[k, closest[k]]), 4),
-                "closest_train_gene": names[closest[k]],
+                "n_cross_set_relatives": int(n_relatives[k]),
+                "relatives": ",".join(names[rel]),
+                "relative_sets": ",".join(lab[rel]),
+                "identities": ",".join(f"{v:.4g}" for v in sym[k, rel]),
                 "sum_identity_over_threshold": round(float(masked[k].sum()), 4),
                 "action": f"move_to_{train_name}"})
         flagged_by_threshold[t] = flagged
+
+    # --- the split table you would get after making those moves -------------
+    for t in thresholds:
+        moved = set(flagged_by_threshold[t]) & set(assign)
+        suffix = "_splits_move_to_train.tsv" if len(thresholds) == 1 \
+            else f"_splits_move_to_train_t{t:g}.tsv"
+        out_name = split_file.name.replace("_splits.tsv", suffix)
+        if out_name == split_file.name:      # unexpected name, never overwrite
+            out_name = split_file.stem + suffix
+        pd.DataFrame({"ID": list(assign),
+                      "Split": [train_name if g in moved else s
+                                for g, s in assign.items()]}).to_csv(
+            run_dir / out_name, sep="\t", index=False)
 
     # --- split sizes, as built and after the move ---------------------------
     # Counted from the assignment table itself, so any label DataSAIL writes
@@ -408,7 +416,7 @@ for f in files:
     sp = pd.read_csv(f, sep="\t", dtype=str)
     if template is None:
         template = (sp.ID.to_numpy(), sp.Split.to_numpy())
-    check_run(f.parent.name, dict(zip(sp.ID, sp.Split)), "datasail", f.parent)
+    check_run(f.parent.name, dict(zip(sp.ID, sp.Split)), "datasail", f.parent, f)
 
 # Baseline: reshuffle the first run's labels. Set sizes are preserved exactly,
 # so the only thing removed is the similarity control, which makes these numbers
@@ -424,18 +432,21 @@ for rep in range(baseline_reps):
 # ---------------------------------------------------------------------------
 th = pd.DataFrame(threshold_rows)
 th.to_csv(outdir / "leakage_threshold.tsv", sep="\t", index=False)
-print("\nHeld-out genes with a relative in the training set, "
+print("\nGenes in the second set with a relative in the first set, "
       "at identity >= threshold:")
 print(th.to_string(index=False))
 
 gf = pd.DataFrame(gene_rows)
 if not gf.empty:
-    gf = gf.sort_values(["run", "threshold", "max_identity"],
-                        ascending=[True, True, False])
+    # 'identities' is already sorted high to low, so its first entry is the
+    # closest relative. Sort on that, then drop the helper column.
+    gf["_top"] = gf.identities.str.split(",").str[0].astype(float)
+    gf = gf.sort_values(["run", "threshold", "_top"],
+                        ascending=[True, True, False]).drop(columns="_top")
     for run_label, part in gf.groupby("run"):
         part.to_csv(outdir / run_label / "leakage_genes.tsv", sep="\t", index=False)
 gf.to_csv(outdir / "leakage_genes.tsv", sep="\t", index=False)
-print(f"\nGenes to move into '{train_name}' (top 20 by identity):")
+print(f"\nGenes to move into '{train_name}' (top 20 by closest relative):")
 print(gf.head(20).to_string(index=False) if not gf.empty else "  none above threshold")
 
 sf = pd.DataFrame(size_rows)
@@ -466,6 +477,7 @@ echo "Packaged results -> ${SCRATCH_ROOT}/${RESULTS_TARBALL}"
 echo; echo "===== Done ====="
 echo "Splits and reports written under: ${OUTDIR}"
 echo "Check leakage_threshold.tsv for how much leaks, DataSAIL rows against the"
-echo "random ones; leakage_genes.tsv for which genes cause it; and"
-echo "split_sizes.tsv for what the splits actually are."
+echo "random ones; leakage_genes.tsv for which genes cause it; split_sizes.tsv"
+echo "for what the splits actually are; and <run>/*_splits_move_to_train.tsv for"
+echo "the ready-made split table with those genes already in ${TRAIN_SET}."
 date

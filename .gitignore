@@ -1,11 +1,14 @@
-data/
+885-class-project/data/genes/prepped/
+885-class-project/data/genes/features/
+885-class-project/data/oe/prepped/
+885-class-project/data/strains/
+investigate/data/
+investigate/ai/data/
 Tony-Neha_GaschLab-GPLandscapes-2026-05-15.docx
 .DS_Store
 investigate/.DS_Store
 investigate/scripts/__pycache__/
 ai/.DS_Store
-ai/data/
 ai/src/__pycache__/
 papers to get informed/
 investigate/raw_data/.DS_Store
-885-class-project/data/

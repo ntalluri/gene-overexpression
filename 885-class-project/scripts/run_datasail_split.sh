@@ -206,6 +206,10 @@ printf '%q ' "${CMD[@]}"; echo
 #                          genes reassigned to '${TRAIN_SET}'. Same ID/Split
 #                          columns and row order as DataSAIL's *_splits.tsv, so
 #                          it drops straight into whatever reads that file.
+#   leakage_after_move.tsv the same check re-run on those moved tables, before
+#                          and after rows side by side. The after_move counts
+#                          should be 0; anything else means the move list is
+#                          incomplete and the run prints a WARNING.
 #   <run>/cross_set_pairs.tsv   every cross-set gene pair at or above the lowest
 #                          threshold, highest identity first.
 #   pairwise_identity.tsv.gz    every non-zero gene pair and its identity, one
@@ -296,7 +300,25 @@ if save_alignments:
 # ---------------------------------------------------------------------------
 # Per-split reports
 # ---------------------------------------------------------------------------
-threshold_rows, gene_rows, size_rows = [], [], []
+threshold_rows, gene_rows, size_rows, after_rows = [], [], [], []
+
+
+def pair_counts(label, kind, lab, rows, only=None, extra=None):
+    """Append one row per set pair and threshold: how many genes in the second
+    set have a relative in the first. `only` restricts it to one threshold."""
+    for a, b in pairs:
+        ia, ib = lab == a, lab == b
+        closest = sym[np.ix_(ib, ia)].max(axis=1) if ia.any() and ib.any() \
+            else np.zeros(ib.sum())
+        for t in (thresholds if only is None else [only]):
+            n_with = int((closest >= t).sum())
+            rows.append({
+                "run": label, "kind": kind, "set_pair": f"{a}-{b}", "threshold": t,
+                "checked_set": b, "n_checked": int(ib.sum()),
+                "n_with_relative": n_with,
+                "n_without_relative": int(ib.sum()) - n_with,
+                "pct_with_relative": round(100 * n_with / max(int(ib.sum()), 1), 2),
+                **(extra or {})})
 
 
 def check_run(label, assign, kind, run_dir=None, split_file=None):
@@ -311,19 +333,7 @@ def check_run(label, assign, kind, run_dir=None, split_file=None):
     # True where two genes are in DIFFERENT splits (both actually assigned)
     cross = (lab[:, None] != lab[None, :]) & in_split[:, None] & in_split[None, :]
 
-    # --- counts per set pair ------------------------------------------------
-    for a, b in pairs:
-        ia, ib = lab == a, lab == b
-        closest = sym[np.ix_(ib, ia)].max(axis=1) if ia.any() and ib.any() \
-            else np.zeros(ib.sum())
-        for t in thresholds:
-            n_with = int((closest >= t).sum())
-            threshold_rows.append({
-                "run": label, "kind": kind, "set_pair": f"{a}-{b}", "threshold": t,
-                "checked_set": b, "n_checked": int(ib.sum()),
-                "n_with_relative": n_with,
-                "n_without_relative": int(ib.sum()) - n_with,
-                "pct_with_relative": round(100 * n_with / max(int(ib.sum()), 1), 2)})
+    pair_counts(label, kind, lab, threshold_rows)
 
     if run_dir is None:          # random baseline: counts only
         return
@@ -365,6 +375,10 @@ def check_run(label, assign, kind, run_dir=None, split_file=None):
         flagged_by_threshold[t] = flagged
 
     # --- the split table you would get after making those moves -------------
+    # Then re-run the same check on it. Every flagged gene ends up in training,
+    # so both ends of every offending pair should now be in training and the
+    # after_move counts should be 0. They are written out as proof, and a
+    # non-zero count means something is wrong with the move list.
     for t in thresholds:
         moved = set(flagged_by_threshold[t]) & set(assign)
         suffix = "_splits_move_to_train.tsv" if len(thresholds) == 1 \
@@ -372,10 +386,15 @@ def check_run(label, assign, kind, run_dir=None, split_file=None):
         out_name = split_file.name.replace("_splits.tsv", suffix)
         if out_name == split_file.name:      # unexpected name, never overwrite
             out_name = split_file.stem + suffix
-        pd.DataFrame({"ID": list(assign),
-                      "Split": [train_name if g in moved else s
-                                for g, s in assign.items()]}).to_csv(
+        after = {g: (train_name if g in moved else s) for g, s in assign.items()}
+        pd.DataFrame({"ID": list(after), "Split": list(after.values())}).to_csv(
             run_dir / out_name, sep="\t", index=False)
+
+        tag = {"n_moved": len(moved), "split_file": out_name}
+        pair_counts(label, "before_move", lab, after_rows, only=t, extra=tag)
+        pair_counts(label, "after_move",
+                    np.array([after.get(n, "") for n in names]),
+                    after_rows, only=t, extra=tag)
 
     # --- split sizes, as built and after the move ---------------------------
     # Counted from the assignment table itself, so any label DataSAIL writes
@@ -453,9 +472,20 @@ sf = pd.DataFrame(size_rows)
 sf.to_csv(outdir / "split_sizes.tsv", sep="\t", index=False)
 print(f"\nSplit sizes, as built and after moving those genes into '{train_name}':")
 print(sf.to_string(index=False) if not sf.empty else "  none")
+
+af = pd.DataFrame(after_rows)
+af.to_csv(outdir / "leakage_after_move.tsv", sep="\t", index=False)
+print("\nThe same check re-run on the moved split tables:")
+print(af.to_string(index=False) if not af.empty else "  none")
+left = int(af.loc[af.kind == "after_move", "n_with_relative"].sum()) if not af.empty else 0
+if left:
+    print(f"WARNING: {left} gene(s) still have a cross-set relative after the "
+          "move. The move list is incomplete, do not trust it.", flush=True)
+else:
+    print("No gene has a cross-set relative after the move, as expected.")
 PYEOF
 then
-    echo "Leakage check: DONE -> ${OUTDIR}/{leakage_threshold,leakage_genes,split_sizes}.tsv"
+    echo "Leakage check: DONE -> ${OUTDIR}/{leakage_threshold,leakage_genes,split_sizes,leakage_after_move}.tsv"
 else
     echo "WARNING: leakage check FAILED (splits are still packaged)." >&2
 fi

@@ -19,7 +19,7 @@ yorf_ids.to_csv(f"{GENE_OUT_DIR}/yorf_ids.csv", sep="\t", index=False)
 # Keep only the fitness score columns
 fs = fs.filter(like="_Avg_log2_Fitness_Score")
 fs.columns = fs.columns.str.replace("_Avg_log2_Fitness_Score", "")
-print(fs.shape)  # expect 15 columns
+# print(fs.shape)  # expect 15 columns
 fs.to_csv(f"{OE_OUT_DIR}/fitness_scores.csv", sep="\t")
 
 # Long format: one row per gene-strain pair
@@ -28,10 +28,9 @@ long_fs = fs.reset_index().melt(id_vars="UID", var_name="strain", value_name="fi
 # Drop gene-strain pairs with no score, recording what was dropped
 dropped = long_fs[long_fs["fitness_score"].isna()].drop(columns="fitness_score")
 dropped.to_csv(f"{GENE_OUT_DIR}/dropped_nan_pairs.csv", sep="\t", index=False)
-print(dropped.groupby("strain").size())
+# print(dropped.groupby("strain").size())
 
 long_fs.dropna().to_csv(f"{OE_OUT_DIR}/long_fitness_scores.csv", sep="\t", index=False)
-
 
 ### PREP GENES ###
 
@@ -53,7 +52,7 @@ print(f"{yorf_ids.duplicated().sum()} exact duplicates: {dups.tolist()}")
 orfs = sgd[sgd["Feature type"] == "ORF"]  # "CDS" is the other option
 orf_values = set(orfs.astype(str).stack().str.strip())
 missing = yorf_ids[~yorf_ids.isin(orf_values)].tolist()
-print(f"{len(yorf_ids) - len(missing)}/{len(yorf_ids)} IDs found; missing: {missing}")
+print(f"Missing YORF ids from SGD after checking if my YORF ids were ORFs {len(yorf_ids) - len(missing)}/{len(yorf_ids)} IDs found; missing: {missing}")
 # expect with CDS: 4107/4112 found
 #   ['YBR098W-1', 'YDR315C-1', 'YDR315C-2', 'YER007W-1', 'YGL145W-1'] -- technical replicates
 # expect with ORF: 4104/4112 found
@@ -62,9 +61,17 @@ print(f"{len(yorf_ids) - len(missing)}/{len(yorf_ids)} IDs found; missing: {miss
 # blocked reading frame: ORF-like region that cannot produce the full-length protein in S288C
 #   (premature stop or frameshift), while the intact gene exists in other strains or species
 
+# Pseudogenes and blocked reading frames are separate feature types in SGD,
+# not ORF qualifiers, so they are not caught by the "Dubious" filter below.
+nonfunctional_types = ["pseudogene", "blocked reading frame"]
+nonfunctional_ids = set(
+    sgd.loc[sgd["Feature type"].isin(nonfunctional_types), "Feature name"]
+    .astype(str).str.strip()
+)
+# print(f"{len(nonfunctional_ids)} pseudogene/blocked-reading-frame IDs in SGD")
 
 #### Investigating the clone ids (e.g. YBR098W-1)
-
+print("Clone Investigatation")
 # Group each "-N" clone with its base ORF
 clone_groups = {}
 for uid in fs.index.astype(str):
@@ -100,27 +107,38 @@ for method in ["pearson", "spearman"]:
     null = [mat.iloc[i].corr(mat.iloc[j], method=method) for i, j in idx if i != j]
     print(f"{method} null percentiles (50, 90, 95, 99): {np.percentile(null, [50, 90, 95, 99]).round(3)}")
 
+
+#### Remove dubious genes, clone IDs, and blocked reading frames/pseudogenes from the yorf id list
+
+print("\nREMOVING GENES")
+
 # Every clone pair falls at or below the null median, so the two copies of an ORF agree
 # no better than two unrelated genes do. There is no justified way to pick one or to
 # average them, so both copies of each ORF are removed.
 pd.Series(sorted(clone_ids), name="Feature name").to_csv(
     f"{GENE_OUT_DIR}/dropped_clone_ids.csv", sep="\t", index=False
 )
-print(f"{len(clone_ids)} clone IDs dropped: {sorted(clone_ids)}")
-
-
-#### Remove dubious genes and clone IDs from the yorf id list
 
 dubious_ids = set(
     sgd.loc[sgd["Feature qualifier"].fillna("").str.contains("Dubious"), "Feature name"]
     .astype(str).str.strip()
 )
+
 is_dubious = yorf_ids.isin(dubious_ids)
+is_nonfunctional = yorf_ids.isin(nonfunctional_ids)
 is_clone = yorf_ids.isin(clone_ids)
+keep = ~is_dubious & ~is_nonfunctional & ~is_clone
 
 yorf_ids[is_dubious].to_csv(f"{GENE_OUT_DIR}/dropped_dubious_yorf_ids.csv", sep="\t", index=False)
-yorf_ids[~is_dubious & ~is_clone].to_csv(
-    f"{GENE_OUT_DIR}/yorf_ids_filtered.csv", sep="\t", index=False
+yorf_ids[is_nonfunctional].to_csv(
+    f"{GENE_OUT_DIR}/dropped_nonfunctional_yorf_ids.csv", sep="\t", index=False
 )
-print(f"{is_dubious.sum()} dubious removed, {is_clone.sum()} clones removed, "
-      f"{(~is_dubious & ~is_clone).sum()} remain")
+yorf_ids[keep].to_csv(f"{GENE_OUT_DIR}/yorf_ids_filtered.csv", sep="\t", index=False)
+
+print(f"{len(yorf_ids[is_dubious])} dubious genes dropped: {yorf_ids[is_dubious].tolist()}")
+print(f"{len(clone_ids)} clone IDs dropped: {sorted(clone_ids)}")
+print(f"{len(yorf_ids[is_nonfunctional])} pseudogene/blocked dropped: {yorf_ids[is_nonfunctional].tolist()}")
+print(f"Dropped {len(dropped)} gene-strain pairs with no score (NA), but all the YORF ids still exist across most strains after this drop")
+
+print(f"{is_dubious.sum()} dubious removed, {is_nonfunctional.sum()} pseudogene/blocked removed, "
+      f"{is_clone.sum()} clones removed, {keep.sum()} YORF ids remain")

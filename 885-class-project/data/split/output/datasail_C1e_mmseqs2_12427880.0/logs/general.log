@@ -1,0 +1,61 @@
+2026-11-05 20:56:25,475 Validating arguments
+2026-11-05 20:56:25,476 Read data
+2026-11-05 20:56:25,621 Cluster first set of entities.
+2026-11-05 20:56:25,676 mkdir mmseqs_results && cd mmseqs_results && mmseqs easy-cluster ../mmseqs.fasta mmseqs_out mmseqs_tmp --threads 4 -c 0.8  && rm ../mmseqs.fasta> /var/lib/condor/execute/slot1/dir_3429859/scratch/output/datasail_C1e_mmseqs2_12427880.0/logs/clean_mmseqs_c_0.8.log
+2026-11-05 20:56:47,940 First round of clustering found 3574 clusters for 4078 samples.
+2026-11-05 20:56:47,945 mkdir mmseqs_results && cd mmseqs_results && mmseqs easy-cluster ../mmseqs.fasta mmseqs_out mmseqs_tmp --threads 4 -c 0.1  && rm ../mmseqs.fasta> /var/lib/condor/execute/slot1/dir_3429859/scratch/output/datasail_C1e_mmseqs2_12427880.0/logs/clean_mmseqs_c_0.1.log
+2026-11-05 20:57:05,960 Second round of clustering found 2878 clusters for 4078 samples.
+2026-11-05 20:57:05,961 mmseqs cannot optimally cluster the data. The minimal number of clusters is 2878.
+2026-11-05 20:57:05,963 Cluster 2878 items based on similarities
+2026-11-05 20:57:16,185 Clustering finished
+2026-11-05 20:57:24,220 Reduced number of clusters to 200.
+2026-11-05 20:57:24,223 Split data
+2026-11-05 20:57:24,223 Define optimization problem
+2026-11-05 20:57:24,223 Splitting technique C1e of run 1 of 15
+2026-11-05 20:57:24,227 Start solving with SCIP
+2026-11-05 20:57:24,227 The problem has 600 variables and 203 constraints.
+2026-11-05 20:57:24,428 Splitting technique C1e of run 2 of 15
+2026-11-05 20:57:24,430 Start solving with SCIP
+2026-11-05 20:57:24,430 The problem has 600 variables and 203 constraints.
+2026-11-05 20:57:24,545 Splitting technique C1e of run 3 of 15
+2026-11-05 20:57:24,547 Start solving with SCIP
+2026-11-05 20:57:24,547 The problem has 600 variables and 203 constraints.
+2026-11-05 20:57:24,768 Splitting technique C1e of run 4 of 15
+2026-11-05 20:57:24,770 Start solving with SCIP
+2026-11-05 20:57:24,770 The problem has 600 variables and 203 constraints.
+2026-11-05 20:57:24,903 Splitting technique C1e of run 5 of 15
+2026-11-05 20:57:24,905 Start solving with SCIP
+2026-11-05 20:57:24,905 The problem has 600 variables and 203 constraints.
+2026-11-05 20:57:25,030 Splitting technique C1e of run 6 of 15
+2026-11-05 20:57:25,031 Start solving with SCIP
+2026-11-05 20:57:25,032 The problem has 600 variables and 203 constraints.
+2026-11-05 20:57:25,154 Splitting technique C1e of run 7 of 15
+2026-11-05 20:57:25,156 Start solving with SCIP
+2026-11-05 20:57:25,156 The problem has 600 variables and 203 constraints.
+2026-11-05 20:57:25,298 Splitting technique C1e of run 8 of 15
+2026-11-05 20:57:25,300 Start solving with SCIP
+2026-11-05 20:57:25,300 The problem has 600 variables and 203 constraints.
+2026-11-05 20:57:25,424 Splitting technique C1e of run 9 of 15
+2026-11-05 20:57:25,426 Start solving with SCIP
+2026-11-05 20:57:25,426 The problem has 600 variables and 203 constraints.
+2026-11-05 20:57:25,538 Splitting technique C1e of run 10 of 15
+2026-11-05 20:57:25,539 Start solving with SCIP
+2026-11-05 20:57:25,539 The problem has 600 variables and 203 constraints.
+2026-11-05 20:57:25,621 Splitting technique C1e of run 11 of 15
+2026-11-05 20:57:25,623 Start solving with SCIP
+2026-11-05 20:57:25,623 The problem has 600 variables and 203 constraints.
+2026-11-05 20:57:25,730 Splitting technique C1e of run 12 of 15
+2026-11-05 20:57:25,732 Start solving with SCIP
+2026-11-05 20:57:25,732 The problem has 600 variables and 203 constraints.
+2026-11-05 20:57:25,845 Splitting technique C1e of run 13 of 15
+2026-11-05 20:57:25,847 Start solving with SCIP
+2026-11-05 20:57:25,847 The problem has 600 variables and 203 constraints.
+2026-11-05 20:57:25,953 Splitting technique C1e of run 14 of 15
+2026-11-05 20:57:25,955 Start solving with SCIP
+2026-11-05 20:57:25,955 The problem has 600 variables and 203 constraints.
+2026-11-05 20:57:26,049 Splitting technique C1e of run 15 of 15
+2026-11-05 20:57:26,050 Start solving with SCIP
+2026-11-05 20:57:26,050 The problem has 600 variables and 203 constraints.
+2026-11-05 20:57:26,143 Store results
+2026-11-05 20:57:26,143 ILP finished and results stored.
+2026-11-05 20:57:26,143 Total runtime: 60.66720s

@@ -28,4 +28,3 @@ YNL031C: listed under From YBR010W (Entry P61830)
 
 ## clean_fasta.bash
 
-

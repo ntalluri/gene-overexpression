@@ -45,7 +45,7 @@ SPLIT_SPEC="${3:-0.7:0.15:0.15}" # colon-separated fractions; names auto-derived
 
 # --- Split construction, via env -------------------------------------------
 INPUT_FASTA="${INPUT_FASTA:-clean.fasta}"
-RUNS="${RUNS:-5}"                # -r: independent splits per technique, for variance
+RUNS="${RUNS:-15}"                # -r: independent splits per technique, for variance
                                  #     reporting. 5 mirrors how you already run multi-seed.
 EPSILON="${EPSILON:-0.1}"        # -e: allowed deviation from target split sizes. Cold
                                  #     splits move WHOLE clusters at once, so exact ratios
@@ -75,11 +75,15 @@ EVAL_SIM="${EVAL_SIM:-mmseqspp}" # similarity used by the CHECK (not by the spli
                                  #     random one.
 TRAIN_SET="${TRAIN_SET:-}"       # which split absorbs the leaking genes. Empty = the
                                  #     first name in --names, i.e. 'train'.
-BASELINE_REPS="${BASELINE_REPS:-5}"  # random splits to score for comparison. Each one
+BASELINE_REPS="${BASELINE_REPS:-15}"  # random splits to score for comparison. Each one
                                  #     reshuffles the first DataSAIL run's labels, so the
                                  #     set sizes are identical and only the similarity
                                  #     control is gone. 0 = skip the baseline.
-BASELINE_SEED="${BASELINE_SEED:-0}"  # seed for those shuffles, so reruns agree.
+BASELINE_SEED="${BASELINE_SEED:-}"   # seed for those shuffles. Empty = fresh
+                                 #     randomness every run. The seed actually used
+                                 #     is printed in the log either way, so a run
+                                 #     can be reproduced after the fact by passing
+                                 #     that number back in here.
 SAVE_ALIGNMENTS="${SAVE_ALIGNMENTS:-1}"  # 1 = also write the full pairwise identity table
                                  #     (pairwise_identity.tsv.gz). 0 = skip it.
 
@@ -96,7 +100,7 @@ echo "Runs / epsilon:     ${RUNS} / ${EPSILON}"
 echo "Solver / timeout:   ${SOLVER} / ${TIMEOUT}s"
 echo "Cluster groups:     ${NUM_CLASSES} (--e-num-classes; DataSAIL default is 50)"
 echo "Leakage check:      ${EVAL_SIM} at identity >= ${THRESHOLDS}"
-echo "Random baselines:   ${BASELINE_REPS} (seed ${BASELINE_SEED})"
+echo "Random baselines:   ${BASELINE_REPS} (seed ${BASELINE_SEED:-none, drawn at run time})"
 
 command -v datasail >/dev/null 2>&1 || { echo "ERROR: datasail not on PATH." >&2; exit 127; }
 if [[ ! -s "${INPUT_FASTA}" ]]; then
@@ -253,7 +257,8 @@ thresholds = sorted(float(t) for t in os.environ["DS_THRESHOLDS"].split())
 eval_sim = os.environ["DS_EVAL_SIM"]
 threads = int(os.environ["DS_THREADS"])
 baseline_reps = int(os.environ["DS_BASELINE_REPS"])
-baseline_seed = int(os.environ["DS_BASELINE_SEED"])
+_seed = os.environ["DS_BASELINE_SEED"].strip()
+baseline_seed = int(_seed) if _seed else None    # None = fresh entropy each run
 save_alignments = os.environ["DS_SAVE_ALIGNMENTS"] == "1"
 pairs = list(itertools.combinations(split_names, 2))   # train-val, train-test, val-test
 
@@ -357,8 +362,8 @@ def check_run(label, assign, kind, run_dir=None, split_file=None):
     # the genes in a cross-set pair and moving them to training does not finish
     # the job: a moved gene drags its same-set relatives across the boundary
     # behind it, turning within-set pairs into new cross-set pairs. So the rule
-    # is: build the similarity graph at the threshold, and any component / subnetwork
-    # that spans more than one split moves into training WHOLE. A component sitting
+    # is: build the similarity graph at the threshold, and any component that
+    # spans more than one split moves into training WHOLE. A component sitting
     # inside one split is left alone, whatever its internal similarity.
     #
     # Only genes outside training are listed, since the training members of a
@@ -496,6 +501,10 @@ for f in files:
 # the "no leakage control" reference for the rows above.
 ids, labels = template
 rng = np.random.default_rng(baseline_seed)
+if baseline_reps:
+    # works for a given seed and for a drawn one, so the log always says which
+    print(f"Leakage check: baseline shuffles use seed "
+          f"{rng.bit_generator.seed_seq.entropy}", flush=True)
 for rep in range(baseline_reps):
     print(f"Leakage check: scoring random baseline {rep}", flush=True)
     check_run(f"random_{rep}", dict(zip(ids, rng.permutation(labels))), "random")

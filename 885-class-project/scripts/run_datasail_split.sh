@@ -75,7 +75,7 @@ EVAL_SIM="${EVAL_SIM:-mmseqspp}" # similarity used by the CHECK (not by the spli
                                  #     random one.
 TRAIN_SET="${TRAIN_SET:-}"       # which split absorbs the leaking genes. Empty = the
                                  #     first name in --names, i.e. 'train'.
-BASELINE_REPS="${BASELINE_REPS:-1}"  # random splits to score for comparison. Each one
+BASELINE_REPS="${BASELINE_REPS:-5}"  # random splits to score for comparison. Each one
                                  #     reshuffles the first DataSAIL run's labels, so the
                                  #     set sizes are identical and only the similarity
                                  #     control is gone. 0 = skip the baseline.
@@ -192,12 +192,17 @@ printf '%q ' "${CMD[@]}"; echo
 #                          have a relative in the first at identity >= threshold.
 #                          One row per run, DataSAIL runs and random baselines
 #                          together, so the comparison is a read down 'kind'.
-#   leakage_genes.tsv      the NAMED genes behind those counts, DataSAIL runs
-#                          only. One row per held-out gene with a cross-set
-#                          relative, carrying parallel comma-separated lists of
-#                          its relatives, their sets and their identities,
-#                          closest first. These are the genes to move into
-#                          '${TRAIN_SET}'. Also copied into each run's own dir.
+#   leakage_genes.tsv      the genes to move into '${TRAIN_SET}', DataSAIL runs
+#                          only, with parallel comma-separated lists of their
+#                          relatives, those relatives' sets and the identities,
+#                          closest first. The move list is built from CONNECTED
+#                          COMPONENTS, not pairs: a similarity component that
+#                          spans more than one split moves whole. 'reason' marks
+#                          whether a gene is itself in a cross-set pair or is
+#                          carried along by its family. Moving only the paired
+#                          genes leaves leakage behind, since a moved gene turns
+#                          its same-set relatives into new cross-set pairs.
+#                          Also copied into each run's own dir.
 #   split_sizes.tsv        requested vs ACTUAL split sizes (cold splits move
 #                          whole clusters, so 0.7/0.15/0.15 is a target, not a
 #                          result), plus the sizes after moving every gene in
@@ -206,10 +211,11 @@ printf '%q ' "${CMD[@]}"; echo
 #                          genes reassigned to '${TRAIN_SET}'. Same ID/Split
 #                          columns and row order as DataSAIL's *_splits.tsv, so
 #                          it drops straight into whatever reads that file.
-#   leakage_after_move.tsv the same check re-run on those moved tables, before
-#                          and after rows side by side. The after_move counts
-#                          should be 0; anything else means the move list is
-#                          incomplete and the run prints a WARNING.
+#   leakage_after_move.tsv the same check re-run on those moved tables AS READ
+#                          BACK FROM DISK, before and after rows side by side.
+#                          The after_move counts should be 0; anything else
+#                          means the move list is incomplete and the run prints
+#                          a WARNING.
 #   <run>/cross_set_pairs.tsv   every cross-set gene pair at or above the lowest
 #                          threshold, highest identity first.
 #   pairwise_identity.tsv.gz    every non-zero gene pair and its identity, one
@@ -347,38 +353,74 @@ def check_run(label, assign, kind, run_dir=None, split_file=None):
         run_dir / "cross_set_pairs.tsv", sep="\t", index=False)
 
     # --- which genes to move -----------------------------------------------
-    # Only genes OUTSIDE the training set are listed: moving one of them into
-    # training removes the pair, so the held-out side is always the fixable one.
-    # relatives / relative_sets / identities are parallel lists, highest
-    # identity first, so position 1 in each is the same relative.
+    # Leakage is a property of CONNECTED COMPONENTS, not of pairs. Flagging only
+    # the genes in a cross-set pair and moving them to training does not finish
+    # the job: a moved gene drags its same-set relatives across the boundary
+    # behind it, turning within-set pairs into new cross-set pairs. So the rule
+    # is: build the similarity graph at the threshold, and any component / subnetwork
+    # that spans more than one split moves into training WHOLE. A component sitting
+    # inside one split is left alone, whatever its internal similarity.
+    #
+    # Only genes outside training are listed, since the training members of a
+    # straddling component are already where they need to be.
+    #
+    # relatives / relative_sets / identities are parallel lists of that gene's
+    # neighbours at or above the threshold, closest first, so position 1 in each
+    # is the same neighbour. 'reason' says whether the gene is itself in a
+    # cross-set pair or is only being carried along by its family.
     flagged_by_threshold = {}
     for t in thresholds:
-        hits = (sym >= t) & cross
-        masked = sym * hits                  # identities to cross-set relatives only
-        n_relatives = hits.sum(axis=1)
+        adj = (sym >= t) & in_split[:, None] & in_split[None, :]
+        ei, ej = np.nonzero(np.triu(adj, 1))
+
+        # union-find over the edge list, cheaper than materialising components
+        parent = np.arange(len(names))
+
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        for a_, b_ in zip(ei.tolist(), ej.tolist()):
+            ra, rb = find(a_), find(b_)
+            if ra != rb:
+                parent[ra] = rb
+        root = np.array([find(k) for k in range(len(names))])
+
+        spans = {}                       # component root -> splits it touches
+        for k in np.nonzero(in_split)[0]:
+            spans.setdefault(root[k], set()).add(lab[k])
+
+        n_cross = ((sym >= t) & cross).sum(axis=1)
         flagged = []
-        for k in np.nonzero((n_relatives > 0) & in_split & (lab != train_name))[0]:
+        for k in np.nonzero(in_split & (lab != train_name))[0]:
+            if len(spans[root[k]]) < 2:  # component lives in one split, fine
+                continue
             flagged.append(str(names[k]))
-            rel = np.nonzero(hits[k])[0]
+            rel = np.nonzero(adj[k])[0]
             rel = rel[np.argsort(-sym[k, rel])]          # closest relative first
             gene_rows.append({
                 "run": label,
                 "threshold": t,
                 "gene": names[k],
                 "current_set": lab[k],
-                "n_cross_set_relatives": int(n_relatives[k]),
+                "n_relatives": len(rel),
+                "n_cross_set_relatives": int(n_cross[k]),
+                "reason": "cross_set_pair" if n_cross[k] else "same_component",
                 "relatives": ",".join(names[rel]),
                 "relative_sets": ",".join(lab[rel]),
                 "identities": ",".join(f"{v:.4g}" for v in sym[k, rel]),
-                "sum_identity_over_threshold": round(float(masked[k].sum()), 4),
+                "sum_identity_over_threshold": round(float(sym[k, rel].sum()), 4),
                 "action": f"move_to_{train_name}"})
         flagged_by_threshold[t] = flagged
 
     # --- the split table you would get after making those moves -------------
-    # Then re-run the same check on it. Every flagged gene ends up in training,
-    # so both ends of every offending pair should now be in training and the
-    # after_move counts should be 0. They are written out as proof, and a
-    # non-zero count means something is wrong with the move list.
+    # The file is written, then READ BACK FROM DISK and re-checked, so what gets
+    # scored is the file you will actually train on, not an in-memory copy of it.
+    # Every straddling component ends up inside training, so no edge can cross a
+    # split boundary afterwards and the after_move counts should be 0. A
+    # non-zero count means the move list or the file itself is wrong.
     for t in thresholds:
         moved = set(flagged_by_threshold[t]) & set(assign)
         suffix = "_splits_move_to_train.tsv" if len(thresholds) == 1 \
@@ -390,10 +432,21 @@ def check_run(label, assign, kind, run_dir=None, split_file=None):
         pd.DataFrame({"ID": list(after), "Split": list(after.values())}).to_csv(
             run_dir / out_name, sep="\t", index=False)
 
+        # read the file back and confirm it says what it was meant to say
+        back = pd.read_csv(run_dir / out_name, sep="\t", dtype=str,
+                           keep_default_na=False)
+        reread = dict(zip(back.ID, back.Split))
+        changed = {g for g, s in reread.items() if assign.get(g) != s}
+        if len(back) != len(assign) or set(reread) != set(assign) \
+                or changed != moved:
+            print(f"WARNING: {out_name} does not match the intended moves: "
+                  f"{len(back)} rows vs {len(assign)}, {len(changed)} genes "
+                  f"changed vs {len(moved)} flagged.", flush=True)
+
         tag = {"n_moved": len(moved), "split_file": out_name}
         pair_counts(label, "before_move", lab, after_rows, only=t, extra=tag)
         pair_counts(label, "after_move",
-                    np.array([after.get(n, "") for n in names]),
+                    np.array([reread.get(n, "") for n in names]),
                     after_rows, only=t, extra=tag)
 
     # --- split sizes, as built and after the move ---------------------------
@@ -432,7 +485,8 @@ template = None
 for f in files:
     f = Path(f)
     print(f"Leakage check: scoring {f}", flush=True)
-    sp = pd.read_csv(f, sep="\t", dtype=str)
+    # keep_default_na so an ID or label that looks like 'NA' survives as text
+    sp = pd.read_csv(f, sep="\t", dtype=str, keep_default_na=False)
     if template is None:
         template = (sp.ID.to_numpy(), sp.Split.to_numpy())
     check_run(f.parent.name, dict(zip(sp.ID, sp.Split)), "datasail", f.parent, f)

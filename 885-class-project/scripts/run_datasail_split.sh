@@ -12,6 +12,10 @@
 #   --e-sim  : mmseqs | mmseqs2 | mmseqspp | cdhit | foldseek | diamond | <matrix.tsv>
 #   -t       : C1e (similarity cold-split, protein entity) | I1e (identity) | R (random)
 #
+# After the split, the script runs ONE leakage check: a pairwise identity
+# threshold. DataSAIL's own scaled_dl score is deliberately not computed, since
+# a summed-similarity ratio does not tell you which genes to move.
+#
 # NOTE (HTCondor): runs inside the datasail docker image, which has datasail +
 # the backend binaries + SCIP on PATH (/opt/conda/bin via the image's ENV PATH).
 
@@ -30,38 +34,56 @@ SCRATCH_ROOT="$PWD"
 # MPLCONFIGDIR warnings DataSAIL emits when it renders the cluster plots.
 export MPLCONFIGDIR="${SCRATCH_ROOT}/mpl"; mkdir -p "${MPLCONFIGDIR}"
 
-# ---------------------------------------------------------------------------
-# Arguments (positional, to stay easy to wire from the .sub 'arguments =' line)
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# ARGUMENTS
+# ===========================================================================
+
+# --- Positional (easy to wire from the .sub 'arguments =' line) ------------
 TECH="${1:-C1e}"                 # C1e = cold-target split (what you want). See above.
-SIM="${2:-mmseqs2}"               # similarity source: a method token OR a matrix .tsv path.
+SIM="${2:-mmseqs2}"              # similarity source: a method token OR a matrix .tsv path.
 SPLIT_SPEC="${3:-0.7:0.15:0.15}" # colon-separated fractions; names auto-derived below.
 
-# --- Tunables via env (all have explained defaults) ---
+# --- Split construction, via env -------------------------------------------
 INPUT_FASTA="${INPUT_FASTA:-clean.fasta}"
 RUNS="${RUNS:-5}"                # -r: independent splits per technique, for variance
                                  #     reporting. 5 mirrors how you already run multi-seed.
-EPSILON="${EPSILON:-0.1}"       # -e: allowed deviation from target split sizes. Cold
+EPSILON="${EPSILON:-0.1}"        # -e: allowed deviation from target split sizes. Cold
                                  #     splits move WHOLE clusters at once, so exact ratios
                                  #     are usually infeasible; 0 would frequently make the
-                                 #     ILP unsolvable. 5% slack is a sane starting point.
+                                 #     ILP unsolvable. 10% slack is a sane starting point.
+DELTA="${DELTA:-0.05}"           # -d: multiplicative factor by how much the stratification
+                                 #     limits (set by --splits) may be exceeded. DataSAIL
+                                 #     default is 0.05.
 SOLVER="${SOLVER:-SCIP}"         # open-source ILP solver that ships with the conda install.
                                  #     Change to GUROBI/CPLEX only if you have a license.
 TIMEOUT="${TIMEOUT:-1800}"       # --to-sec: cap optimizer time (excludes clustering) so a
                                  #     hard instance can't burn the whole slot. 30 min.
 THREADS="${THREADS:-$(nproc)}"   # forwarded to the backend clustering tool. 0 = all CPUs.
-
-DELTA="${DELTA:-0.05}"           # -d: A multiplicative factor by how much the limits
-                                 # (as defined in the -s / –splits argument defined)
-                                 # of the stratification can be exceeded. Default is 0.05
-
 NUM_CLASSES="${NUM_CLASSES:-200}" # --e-num-classes: number of cluster groups DataSAIL
-                                 # condenses the entity clusters into before the ILP.
-                                 # Default in DataSAIL is 50; more groups = finer-grained
-                                 # units to move between splits, so sizes can land closer
-                                 # to the requested 0.7/0.15/0.15. Costs more ILP time.
-                                 # Irrelevant for TECH=R (no clustering), so only added below.
+                                 #     condenses the entity clusters into before the ILP.
+                                 #     DataSAIL default is 50; more groups = finer-grained
+                                 #     units to move between splits, so sizes can land
+                                 #     closer to the requested 0.7/0.15/0.15. Costs ILP
+                                 #     time. Irrelevant for TECH=R, so only added below.
 
+# --- Leakage check, via env ------------------------------------------------
+THRESHOLDS="${THRESHOLDS:-0.3}"  # identity cutoff(s), space-separated for several.
+                                 #     0.3 is the usual cutoff in protein ML.
+EVAL_SIM="${EVAL_SIM:-mmseqspp}" # similarity used by the CHECK (not by the split).
+                                 #     Must be pairwise: 'mmseqs2' only gives cluster-level
+                                 #     similarity and would score a good split like a
+                                 #     random one.
+TRAIN_SET="${TRAIN_SET:-}"       # which split absorbs the leaking genes. Empty = the
+                                 #     first name in --names, i.e. 'train'.
+BASELINE_REPS="${BASELINE_REPS:-5}"  # random splits to score for comparison. Each one
+                                 #     reshuffles the first DataSAIL run's labels, so the
+                                 #     set sizes are identical and only the similarity
+                                 #     control is gone. 0 = skip the baseline.
+BASELINE_SEED="${BASELINE_SEED:-0}"  # seed for those shuffles, so reruns agree.
+SAVE_ALIGNMENTS="${SAVE_ALIGNMENTS:-1}"  # 1 = also write the full pairwise identity table
+                                 #     (pairwise_identity.tsv.gz). 0 = skip it.
+
+# ===========================================================================
 
 echo "===== DataSAIL split job started ====="
 date; hostname; pwd
@@ -73,6 +95,8 @@ echo "Split spec:         ${SPLIT_SPEC}"
 echo "Runs / epsilon:     ${RUNS} / ${EPSILON}"
 echo "Solver / timeout:   ${SOLVER} / ${TIMEOUT}s"
 echo "Cluster groups:     ${NUM_CLASSES} (--e-num-classes; DataSAIL default is 50)"
+echo "Leakage check:      ${EVAL_SIM} at identity >= ${THRESHOLDS}"
+echo "Random baselines:   ${BASELINE_REPS} (seed ${BASELINE_SEED})"
 
 command -v datasail >/dev/null 2>&1 || { echo "ERROR: datasail not on PATH." >&2; exit 127; }
 if [[ ! -s "${INPUT_FASTA}" ]]; then
@@ -94,6 +118,7 @@ case "${#FRACS[@]}" in
   3) NAMES=(train val test) ;;
   *) echo "ERROR: split spec must have 2 or 3 fractions (got ${#FRACS[@]})." >&2; exit 1 ;;
 esac
+TRAIN_SET="${TRAIN_SET:-${NAMES[0]}}"
 
 # Validate the similarity source: either a known method token or an existing file.
 # (For R, similarity is irrelevant and omitted entirely below.)
@@ -126,7 +151,7 @@ CMD=(datasail
     --techniques "${TECH}"
     --splits    "${FRACS[@]}"
     --names     "${NAMES[@]}"
-    --e-type    P # this makes the proteins the e-entity type
+    --e-type    P                 # proteins are the e-entity type
     --e-data    "${INPUT_FASTA}"
     --runs      "${RUNS}"
     --epsilon   "${EPSILON}"
@@ -149,150 +174,280 @@ echo; echo "===== Running DataSAIL ====="
 printf '%q ' "${CMD[@]}"; echo
 "${CMD[@]}"
 
-[ -d mmseqspp_results ] && cp mmseqspp_results/alis.tsv "${OUTDIR}/" || true
-
-
 # ---------------------------------------------------------------------------
-# Leakage evaluation with DataSAIL's eval_split (needs DataSAIL >= 1.3.0).
-# Uses 'mmseqspp' (pairwise MMseqs2 similarities). 'mmseqs2' only gives
-# cluster-level similarity and scores a good split the same as a random one.
+# Threshold leakage check.
+#
+# Computes all-vs-all sequence identity ONCE with EVAL_SIM, then asks of every
+# split DataSAIL produced: which held-out genes have a close relative in the
+# TRAINING set? Paralogs from yeast's genome duplication can share sequence and
+# OE effects; with one copy in train and the other in test, a model can predict
+# the test gene from its copy.
+#
+# Held-out vs held-out similarity is NOT checked. A val gene resembling a test
+# gene is not leakage, since the model trains on neither.
+#
+# Every DataSAIL run is scored, and so are BASELINE_REPS random splits of the
+# same set sizes. The random numbers are what the check would report with no
+# similarity control at all, so they are the yardstick for the real runs.
 #
 # Writes to ${OUTDIR}:
-#   leakage.tsv            scaled_dl = cross-set similarity / total similarity
-#                          (lower = less leakage), split by set pair; the
-#                          set-pair columns add up to scaled_dl.
-#   leakage_threshold.tsv  per-protein check: how many val/test proteins have a
-#                          close relative (identity >= THRESHOLDS) in another set.
-#                          Paralogs from yeast's genome duplication can share
-#                          sequence and OE effects; with one in train and one in
-#                          test, a model could predict the test gene from its copy.
-#   mmseqspp_alignments.tsv.gz  the pairwise alignment table (query, target,
-#                          fident) that both checks use.
-#   C1e_*/cross_set_pairs.tsv  every protein pair in different sets with
-#                          identity >= the lowest threshold, highest first.
-# Each check is also run on a random split of the same sizes, for comparison.
+#   leakage_threshold.tsv  COUNTS per held-out set: how many of its genes have a
+#                          training relative at identity >= threshold. One row
+#                          per run, DataSAIL runs and random baselines together,
+#                          so the comparison is a read down the 'kind' column.
+#   leakage_genes.tsv      the NAMED genes behind those counts, DataSAIL runs
+#                          only. One row per held-out gene with a training
+#                          relative: the set it sits in, how many relatives it
+#                          has, the highest identity, the closest training gene,
+#                          and the summed identity over threshold. These are the
+#                          genes to move into '${TRAIN_SET}'. Also copied into
+#                          each run's own dir.
+#   split_sizes.tsv        requested vs ACTUAL split sizes (cold splits move
+#                          whole clusters, so 0.7/0.15/0.15 is a target, not a
+#                          result), plus the sizes after moving every gene in
+#                          leakage_genes.tsv into '${TRAIN_SET}'.
+#   <run>/cross_set_pairs.tsv   every training/held-out gene pair at or above the
+#                          lowest threshold, highest identity first.
+#   pairwise_identity.tsv.gz    every non-zero gene pair and its identity, one
+#                          row per pair (SAVE_ALIGNMENTS=1).
 # ---------------------------------------------------------------------------
-THRESHOLDS="${THRESHOLDS:-0.3}"   # identity cutoff(s), in protien ml, .3 is used
+echo; echo "===== Threshold leakage check ====="
 
-echo; echo "===== Evaluating leakage ====="
-echo "Leakage evaluation: starting"
-if python3 - "${OUTDIR}" "${INPUT_FASTA}" "${NAMES[*]}" "${THRESHOLDS}" << 'PYEOF'
-import glob, itertools, os, sys
+export DS_OUTDIR="${OUTDIR}"
+export DS_FASTA="${INPUT_FASTA}"
+export DS_SPLIT_NAMES="${NAMES[*]}"
+export DS_FRACS="${FRACS[*]}"
+export DS_TRAIN_SET="${TRAIN_SET}"
+export DS_THRESHOLDS="${THRESHOLDS}"
+export DS_EVAL_SIM="${EVAL_SIM}"
+export DS_THREADS="${THREADS}"
+export DS_BASELINE_REPS="${BASELINE_REPS}"
+export DS_BASELINE_SEED="${BASELINE_SEED}"
+export DS_SAVE_ALIGNMENTS="${SAVE_ALIGNMENTS}"
+
+if python3 << 'PYEOF'
+import glob, os
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
-import datasail.eval as ds_eval
+from datasail.reader.read import read_data_type
+from datasail.cluster.clustering import cluster
+from datasail.settings import KW_LINKAGE, KW_LOGDIR, KW_OUTDIR, KW_THREADS
 
-# Wrap DataSAIL's clustering step to (1) make the matrix writable (DataSAIL 1.3.0
-# + pandas >= 3 gives a read-only one) and (2) keep a copy for our own checks.
-captured = {}
-_cluster = ds_eval.cluster
-def _wrapped(ds, **kw):
-    ds = _cluster(ds, **kw)
-    ds.cluster_similarity = np.array(ds.cluster_similarity)
-    captured["names"] = np.array(ds.cluster_names)
-    captured["sim"] = ds.cluster_similarity.copy()
-    return ds
-ds_eval.cluster = _wrapped
-eval_split = ds_eval.eval_split
+outdir = Path(os.environ["DS_OUTDIR"])
+split_names = os.environ["DS_SPLIT_NAMES"].split()
+requested = dict(zip(split_names, (float(f) for f in os.environ["DS_FRACS"].split())))
+train_name = os.environ["DS_TRAIN_SET"]
+thresholds = sorted(float(t) for t in os.environ["DS_THRESHOLDS"].split())
+eval_sim = os.environ["DS_EVAL_SIM"]
+threads = int(os.environ["DS_THREADS"])
+baseline_reps = int(os.environ["DS_BASELINE_REPS"])
+baseline_seed = int(os.environ["DS_BASELINE_SEED"])
+save_alignments = os.environ["DS_SAVE_ALIGNMENTS"] == "1"
+# Only TRAINING vs held-out matters. A val gene that resembles a test gene is
+# not leakage: the model never sees either during training, so neither one can
+# be predicted from the other.
+pairs = [(train_name, b) for b in split_names if b != train_name]
 
-outdir, fasta, split_names = sys.argv[1], sys.argv[2], sys.argv[3].split()
-thresholds = sorted(float(t) for t in sys.argv[4].split())
-pairs = list(itertools.combinations(split_names, 2))   # train-val, train-test, val-test
-
-# mmseqspp sorts its similarity matrix by ID but labels it in FASTA order,
-# so evaluate on a copy of the FASTA sorted by ID.
+# ---------------------------------------------------------------------------
+# All-vs-all identity, computed once for every run.
+# mmseqspp labels its matrix in FASTA order but sorts it by ID, so we feed it a
+# copy of the FASTA sorted by ID and then assert the two orders agree.
+# ---------------------------------------------------------------------------
 seqs, name = {}, None
-for line in open(fasta):
+for line in open(os.environ["DS_FASTA"]):
     line = line.strip()
     if line.startswith(">"):
         name = line[1:]
         seqs[name] = ""
     elif line:
         seqs[name] += line
-fasta = "eval_sorted.fasta"
-with open(fasta, "w") as out:
+sorted_fasta = Path("eval_sorted.fasta")
+with sorted_fasta.open("w") as out:
     for n in sorted(seqs):
         out.write(f">{n}\n{seqs[n]}\n")
 
-threshold_rows = []
+print(f"Leakage check: computing all-vs-all identity with {eval_sim} "
+      f"({len(seqs)} sequences)", flush=True)
+ds = read_data_type("P")(data=sorted_fasta, weights=None, sim=eval_sim, dist=None,
+                         num_clusters=np.inf, detect_duplicates=False)
+ds = cluster(ds, **{KW_THREADS: threads, KW_LOGDIR: None, KW_LINKAGE: "average",
+                    KW_OUTDIR: None})
+if ds.cluster_similarity is None:
+    raise SystemExit(f"ERROR: {eval_sim} produced no similarity matrix.")
 
-def evaluate(label, assign, run_dir=None):
-    scaled, total, max_dl = eval_split("P", fasta, None, "mmseqspp", None, None, assign)[:3]
-    names, S = captured["names"], captured["sim"]
+names = np.array(ds.cluster_names)
+S = np.array(ds.cluster_similarity, dtype=np.float32)   # np.array() also drops read-only
+if S.shape[0] != len(names):
+    raise SystemExit(f"ERROR: matrix is {S.shape} but there are {len(names)} names.")
+if list(names) != sorted(seqs):
+    raise SystemExit("ERROR: matrix row order does not match the sorted FASTA. "
+                     "The matrix cannot be trusted to be labelled correctly.")
 
-    # first call only: save the alignment table and build a symmetric copy
-    # (A vs B and B vs A can differ slightly; keep the higher one, drop self-pairs)
-    if "sym" not in captured:
-        r, c = np.nonzero(S)
-        pd.DataFrame({"query": names[r], "target": names[c], "fident": S[r, c]}).to_csv(
-            os.path.join(outdir, "mmseqspp_alignments.tsv.gz"), sep="\t", index=False)
-        sym = np.maximum(S, S.T).astype(np.float32)
-        np.fill_diagonal(sym, 0)
-        captured["sym"] = sym
-    sym = captured["sym"]
+# A vs B and B vs A can differ slightly; keep the higher one and drop self-pairs.
+sym = np.maximum(S, S.T)
+np.fill_diagonal(sym, 0)
+del S
 
+if save_alignments:
+    r, c = np.nonzero(np.triu(sym, 1))
+    pd.DataFrame({"gene_1": names[r], "gene_2": names[c],
+                  "identity": sym[r, c]}).to_csv(
+        outdir / "pairwise_identity.tsv.gz", sep="\t", index=False)
+
+# ---------------------------------------------------------------------------
+# Per-split reports
+# ---------------------------------------------------------------------------
+threshold_rows, gene_rows, size_rows = [], [], []
+
+
+def check_run(label, assign, kind, run_dir=None):
+    """Score one split assignment.
+
+    kind is 'datasail' or 'random'. Random baselines only contribute counts to
+    leakage_threshold.tsv: naming their offenders is pointless, and their sizes
+    match the run they were shuffled from.
+    """
     lab = np.array([assign.get(n, "") for n in names])
-    row = {"run": label, "scaled_dl": scaled}
+    in_split = np.isin(lab, split_names)
+    is_train = lab == train_name
+    # True where one gene is in training and the other is held out. Held-out vs
+    # held-out pairs are ignored on purpose, see the note on `pairs` above.
+    cross = (is_train[:, None] != is_train[None, :]) \
+        & in_split[:, None] & in_split[None, :]
+
+    # --- counts per set pair ------------------------------------------------
     for a, b in pairs:
         ia, ib = lab == a, lab == b
-        row[f"{a}-{b}"] = (S[np.ix_(ia, ib)].sum() + S[np.ix_(ib, ia)].sum()) / max_dl
-        # per-protein check: closest relative in set a for each protein in set b
-        closest = sym[np.ix_(ib, ia)].max(axis=1) if ia.any() and ib.any() else np.zeros(ib.sum())
+        closest = sym[np.ix_(ib, ia)].max(axis=1) if ia.any() and ib.any() \
+            else np.zeros(ib.sum())
         for t in thresholds:
             n_with = int((closest >= t).sum())
             threshold_rows.append({
-                "run": label, "set_pair": f"{a}-{b}", "threshold": t,
+                "run": label, "kind": kind, "set_pair": f"{a}-{b}", "threshold": t,
                 "checked_set": b, "n_checked": int(ib.sum()),
                 "n_with_relative": n_with,
                 "n_without_relative": int(ib.sum()) - n_with,
                 "pct_with_relative": round(100 * n_with / max(int(ib.sum()), 1), 2)})
-    if abs(sum(row[f"{a}-{b}"] for a, b in pairs) - scaled) > 1e-6:
-        print(f"WARNING: set-pair breakdown for {label} does not add up to scaled_dl", flush=True)
-    row.update(total_dl=total, max_dl=max_dl)
 
-    # list every cross-set pair at or above the lowest threshold
-    if run_dir is not None:
-        i, j = np.nonzero(np.triu(sym >= thresholds[0], 1))
-        keep = np.isin(lab[i], split_names) & np.isin(lab[j], split_names) & (lab[i] != lab[j])
-        i, j = i[keep], j[keep]
-        pd.DataFrame({"protein_1": names[i], "set_1": lab[i],
-                      "protein_2": names[j], "set_2": lab[j],
-                      "identity": np.round(sym[i, j], 3)}).sort_values(
-            "identity", ascending=False).to_csv(
-            os.path.join(run_dir, "cross_set_pairs.tsv"), sep="\t", index=False)
-    return row
+    if run_dir is None:          # random baseline: counts only
+        return
 
-rows = []
-files = sorted(glob.glob(os.path.join(outdir, "*", "*_splits.tsv")))
-print(f"Leakage evaluation: found {len(files)} split file(s)", flush=True)
+    # --- every offending pair, training gene beside held-out gene -----------
+    i, j = np.nonzero(np.triu((sym >= thresholds[0]) & cross, 1))
+    flip = ~is_train[i]                      # put the training gene in column 1
+    i, j = np.where(flip, j, i), np.where(flip, i, j)
+    pd.DataFrame({"train_gene": names[i],
+                  "heldout_gene": names[j], "heldout_set": lab[j],
+                  "identity": np.round(sym[i, j], 4)}).sort_values(
+        "identity", ascending=False).to_csv(
+        run_dir / "cross_set_pairs.tsv", sep="\t", index=False)
+
+    # --- which genes to move -----------------------------------------------
+    # Held-out genes with a training relative. Moving one into training removes
+    # the pair, so the held-out side is always the fixable one. Every relative
+    # counted here is in training, which is why no 'relative set' column exists.
+    flagged_by_threshold = {}
+    for t in thresholds:
+        hits = (sym >= t) & cross
+        masked = sym * hits                  # identities to training relatives only
+        n_relatives = hits.sum(axis=1)
+        closest = masked.argmax(axis=1)
+        flagged = []
+        for k in np.nonzero((n_relatives > 0) & in_split & ~is_train)[0]:
+            flagged.append(str(names[k]))
+            gene_rows.append({
+                "run": label,
+                "threshold": t,
+                "gene": names[k],
+                "current_set": lab[k],
+                "n_train_relatives": int(n_relatives[k]),
+                "max_identity": round(float(masked[k, closest[k]]), 4),
+                "closest_train_gene": names[closest[k]],
+                "sum_identity_over_threshold": round(float(masked[k].sum()), 4),
+                "action": f"move_to_{train_name}"})
+        flagged_by_threshold[t] = flagged
+
+    # --- split sizes, as built and after the move ---------------------------
+    # Counted from the assignment table itself, so any label DataSAIL writes
+    # outside split_names (e.g. 'not selected') shows up as its own row.
+    counts = {}
+    for v in assign.values():
+        counts[v] = counts.get(v, 0) + 1
+    total = sum(counts.values())
+    for t in thresholds:
+        moved = [g for g in flagged_by_threshold[t] if g in assign]
+        out_of = {}
+        for g in moved:
+            out_of[assign[g]] = out_of.get(assign[g], 0) + 1
+        for s in sorted(counts):
+            n_in = len(moved) if s == train_name else 0
+            n_out = out_of.get(s, 0)
+            after = counts[s] + n_in - n_out
+            size_rows.append({
+                "run": label, "threshold": t, "split": s,
+                "requested_frac": requested.get(s, float("nan")),
+                "n_requested": round(requested[s] * total) if s in requested else "",
+                "n_actual": counts[s],
+                "pct_actual": round(100 * counts[s] / total, 2),
+                "n_moved_in": n_in, "n_moved_out": n_out,
+                "n_after_move": after,
+                "pct_after_move": round(100 * after / total, 2),
+                "n_total": total})
+
+
+files = sorted(glob.glob(str(outdir / "*" / "*_splits.tsv")))
+print(f"Leakage check: found {len(files)} split file(s)", flush=True)
 if not files:
-    sys.exit("ERROR: no *_splits.tsv files found")
+    raise SystemExit("ERROR: no *_splits.tsv files found")
+template = None
 for f in files:
-    print(f"Leakage evaluation: scoring {f}", flush=True)
+    f = Path(f)
+    print(f"Leakage check: scoring {f}", flush=True)
     sp = pd.read_csv(f, sep="\t", dtype=str)
-    assign = dict(zip(sp.ID, sp.Split))   # must be a dict; a file path fails in v1.4.0
-    rows.append(evaluate(os.path.basename(os.path.dirname(f)), assign, os.path.dirname(f)))
+    if template is None:
+        template = (sp.ID.to_numpy(), sp.Split.to_numpy())
+    check_run(f.parent.name, dict(zip(sp.ID, sp.Split)), "datasail", f.parent)
 
-# baseline: shuffle the last run's labels (same split sizes, no similarity control)
-print("Leakage evaluation: scoring random baseline", flush=True)
-shuffled = dict(zip(sp.ID, np.random.default_rng(0).permutation(sp.Split.to_numpy())))
-rows.append(evaluate("random_baseline", shuffled))
+# Baseline: reshuffle the first run's labels. Set sizes are preserved exactly,
+# so the only thing removed is the similarity control, which makes these numbers
+# the "no leakage control" reference for the rows above.
+ids, labels = template
+rng = np.random.default_rng(baseline_seed)
+for rep in range(baseline_reps):
+    print(f"Leakage check: scoring random baseline {rep}", flush=True)
+    check_run(f"random_{rep}", dict(zip(ids, rng.permutation(labels))), "random")
 
-df = pd.DataFrame(rows)
-df.to_csv(os.path.join(outdir, "leakage.tsv"), sep="\t", index=False)
-print(df.to_string(index=False, float_format="%.4f"))
-
+# ---------------------------------------------------------------------------
+# Write the three reports
+# ---------------------------------------------------------------------------
 th = pd.DataFrame(threshold_rows)
-th.to_csv(os.path.join(outdir, "leakage_threshold.tsv"), sep="\t", index=False)
-print("\nProteins in the second set with a relative in the first set at identity >= threshold:")
+th.to_csv(outdir / "leakage_threshold.tsv", sep="\t", index=False)
+print("\nHeld-out genes with a relative in the training set, "
+      "at identity >= threshold:")
 print(th.to_string(index=False))
+
+gf = pd.DataFrame(gene_rows)
+if not gf.empty:
+    gf = gf.sort_values(["run", "threshold", "max_identity"],
+                        ascending=[True, True, False])
+    for run_label, part in gf.groupby("run"):
+        part.to_csv(outdir / run_label / "leakage_genes.tsv", sep="\t", index=False)
+gf.to_csv(outdir / "leakage_genes.tsv", sep="\t", index=False)
+print(f"\nGenes to move into '{train_name}' (top 20 by identity):")
+print(gf.head(20).to_string(index=False) if not gf.empty else "  none above threshold")
+
+sf = pd.DataFrame(size_rows)
+sf.to_csv(outdir / "split_sizes.tsv", sep="\t", index=False)
+print(f"\nSplit sizes, as built and after moving those genes into '{train_name}':")
+print(sf.to_string(index=False) if not sf.empty else "  none")
 PYEOF
 then
-    echo "Leakage evaluation: DONE -> ${OUTDIR}/leakage.tsv, leakage_threshold.tsv"
+    echo "Leakage check: DONE -> ${OUTDIR}/{leakage_threshold,leakage_genes,split_sizes}.tsv"
 else
-    echo "WARNING: leakage evaluation FAILED (splits are still packaged)." >&2
+    echo "WARNING: leakage check FAILED (splits are still packaged)." >&2
 fi
-
 
 # ---------------------------------------------------------------------------
 # Package results for transfer.
@@ -309,8 +464,8 @@ tar -czf "${SCRATCH_ROOT}/${RESULTS_TARBALL}" -C "${SCRATCH_ROOT}" output
 echo "Packaged results -> ${SCRATCH_ROOT}/${RESULTS_TARBALL}"
 
 echo; echo "===== Done ====="
-echo "Splits, reports, and logs written under: ${OUTDIR}"
-echo "(DataSAIL writes one assignment table per technique/run plus a leakage report;"
-echo " inspect the report before trusting the split — watch for a percolated mega-cluster"
-echo " that forces an imbalanced split.)"
+echo "Splits and reports written under: ${OUTDIR}"
+echo "Check leakage_threshold.tsv for how much leaks, DataSAIL rows against the"
+echo "random ones; leakage_genes.tsv for which genes cause it; and"
+echo "split_sizes.tsv for what the splits actually are."
 date

@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 
+# TODO add what this does
+# takes the yorf id mapping to protein sequences and cleans it up such that it works with DataSAIL
+
 set -euo pipefail
 export LC_ALL=C   # same sort order for both ID lists (comm needs this)
 
 PREP=data/genes/prepped
-IN=data/genes/yorf_filtered_idmapping_2026_10_29.fasta.gz
+IN=data/genes/yorf_filtered_idmapping_2026_11_05.fasta.gz
 OUT=$PREP/clean.fasta
 MAP=$PREP/mapping_from_yorf_filtered_to_uniprot.tsv
 MISSING=$PREP/missing_from_fasta.txt
-ID_COL_NAME=Entry   # MAP column holding UniProt accessions
+ID_COL_NAME=Entry  # MAP column holding UniProt accessions
 
 # add the prepped folder if it doesn't exist
 mkdir -p "$PREP"

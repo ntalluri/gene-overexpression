@@ -46,13 +46,14 @@ def prep_mapping(mapping_path, yorf_path, out_name, expected_missing, expected_d
     )
 
     # return the mapping
-    out = id_mapping[["From", "Entry", "Entry Name", "Gene Names", "Sequence"]]
+    out = id_mapping[["From", "Entry", "Entry Name", "Gene Names", "Length", "Sequence"]]
     out.to_csv(OUT_DIR / out_name, sep="\t", index=False)
     return out
 
 
 prep_mapping(
-    "data/genes/yorf_filtered_idmapping_2026_10_29.tsv.gz", # comes from uniprot using yorf_ids_filtered mapping Gene_names to Uniprot Swiss prot, should contain the columns ['From', 'Entry', 'Entry Name', 'Gene Names', 'Organism', 'Sequence']
+    "data/genes/yorf_filtered_idmapping_2026_11_05.tsv.gz", # TODO: update to a new mapping
+    # comes from uniprot using yorf_ids_filtered.csv and maps Gene_names to Uniprot Swiss prot ids, should contain the columns ['From', 'Entry', 'Entry Name', 'Gene Names', 'Organism', 'Length', 'Sequence']
     "data/genes/prepped/yorf_ids_filtered.csv",  # comes from scripts/prep_data.py
     "mapping_from_yorf_filtered_to_uniprot.tsv", # output file
     expected_missing={"YNL030W", "YKR059W", "YNL031C"}, # these genes encode a protein identical to a paralog, so UniProt returns one entry for the pair

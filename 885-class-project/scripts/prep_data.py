@@ -22,16 +22,6 @@ fs.columns = fs.columns.str.replace("_Avg_log2_Fitness_Score", "")
 # print(fs.shape)  # expect 15 columns
 fs.to_csv(f"{OE_OUT_DIR}/fitness_scores.csv", sep="\t")
 
-# Long format: one row per gene-strain pair
-long_fs = fs.reset_index().melt(id_vars="UID", var_name="strain", value_name="fitness_score")
-
-# Drop gene-strain pairs with no score, recording what was dropped
-dropped = long_fs[long_fs["fitness_score"].isna()].drop(columns="fitness_score")
-dropped.to_csv(f"{GENE_OUT_DIR}/dropped_nan_pairs.csv", sep="\t", index=False)
-# print(dropped.groupby("strain").size())
-
-long_fs.dropna().to_csv(f"{OE_OUT_DIR}/long_fitness_scores.csv", sep="\t", index=False)
-
 ### PREP GENES ###
 
 sgd_columns = [
@@ -68,7 +58,6 @@ nonfunctional_ids = set(
     sgd.loc[sgd["Feature type"].isin(nonfunctional_types), "Feature name"]
     .astype(str).str.strip()
 )
-# print(f"{len(nonfunctional_ids)} pseudogene/blocked-reading-frame IDs in SGD")
 
 #### Investigating the clone ids (e.g. YBR098W-1)
 print("Clone Investigatation")
@@ -138,7 +127,37 @@ yorf_ids[keep].to_csv(f"{GENE_OUT_DIR}/yorf_ids_filtered.csv", sep="\t", index=F
 print(f"{len(yorf_ids[is_dubious])} dubious genes dropped: {yorf_ids[is_dubious].tolist()}")
 print(f"{len(clone_ids)} clone IDs dropped: {sorted(clone_ids)}")
 print(f"{len(yorf_ids[is_nonfunctional])} pseudogene/blocked dropped: {yorf_ids[is_nonfunctional].tolist()}")
-print(f"Dropped {len(dropped)} gene-strain pairs with no score (NA), but all the YORF ids still exist across most strains after this drop")
 
 print(f"{is_dubious.sum()} dubious removed, {is_nonfunctional.sum()} pseudogene/blocked removed, "
       f"{is_clone.sum()} clones removed, {keep.sum()} YORF ids remain")
+
+
+#### Set up long form of OE data ####
+
+# Long format: one row per gene-strain pair
+long_fs = fs.reset_index().melt(id_vars="UID", var_name="strain", value_name="fitness_score")
+long_fs["UID"] = long_fs["UID"].astype(str).str.strip()
+
+keep_ids = set(yorf_ids[keep])
+
+# Gene-level drops: dubious, clone, pseudogene/blocked. Removed from every strain.
+dropped_genes = long_fs[~long_fs["UID"].isin(keep_ids)].drop(columns="fitness_score")
+long_fs = long_fs[long_fs["UID"].isin(keep_ids)]
+
+# NaN drops, among the genes that survived the gene-level filter
+dropped_NA = long_fs[long_fs["fitness_score"].isna()].drop(columns="fitness_score")
+dropped_NA.to_csv(f"{GENE_OUT_DIR}/dropped_nan_pairs.csv", sep="\t", index=False)
+long_fs = long_fs.dropna()
+
+# save long format of file
+long_fs.to_csv(f"{OE_OUT_DIR}/long_fitness_scores.csv", sep="\t", index=False)
+
+# create a summary of what was removed
+summary = pd.DataFrame({
+    "dubious_cloned_pseudogene_blocked": dropped_genes.groupby("strain").size(),
+    "NA_scores": dropped_NA.groupby("strain").size(),
+    "kept": long_fs.groupby("strain").size(),
+}).fillna(0).astype(int)
+summary["total_dropped"] = summary["dubious_cloned_pseudogene_blocked"] + summary["NA_scores"]
+print(summary)
+summary.to_csv(f"{GENE_OUT_DIR}/summary_of_dropped_genes.csv",sep="\t")

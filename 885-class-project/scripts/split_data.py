@@ -1,6 +1,10 @@
 # Requires XXX files ran with DataSAIL ran with the run_datasail_split.sh and .sub files on CHTC
 
 import pandas as pd
+import os
+
+SPLIT_OUT_DIR = "data/split/prepped"
+os.makedirs(SPLIT_OUT_DIR, exist_ok=True)
 
 
 #!/usr/bin/env python3
@@ -26,9 +30,8 @@ df = df.dropna(subset=["Split"])
 # a gene split across sets is leakage no similarity check would catch
 assert df.groupby("UID").Split.nunique().max() == 1
 
-# TODO: add in that these will go into split? or this is the code I will use when I start to train the models
 for s in ("train", "val", "test"):
     part = df[df.Split == s]
     part[["UID", "strain", "fitness_score", "Split"]].to_csv(
-        f"{s}.tsv", sep="\t", index=False)
+        f"{SPLIT_OUT_DIR}/{s}.tsv", sep="\t", index=False)
     print(f"{s:6} {len(part):6} rows  {part.UID.nunique():5} genes")

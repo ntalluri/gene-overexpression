@@ -2,10 +2,10 @@ These files were create using DataSAIL and mmseq2.
 - script/run_datasail_split.sh
 - script/run_datasail_split.sub
 
-run	train	val	test	total deviation	after-move counts
-C1e_6	70.86	13.29	15.85	3.42	2901 / 544 / 649
-C1e_12	71.81	14.75	13.43	3.63	2940 / 604 / 550
-C1e_10	72.03	13.68	14.29	4.06	2949 / 560 / 585
+Run	Train	Val	Test	Total deviation	Val/test gap	Counts (train / val / test)
+C1e_6	70.86%	13.29%	15.85%	3.42	105	2901 / 544 / 649
+C1e_12	71.81%	14.75%	13.43%	3.63	54	2940 / 604 / 550
+C1e_10	72.03%	13.68%	14.29%	4.06	25	2949 / 560 / 585
 
 I picked c1e_10 as this kept things very similar and even to a 70/15/15 split
 

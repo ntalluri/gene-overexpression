@@ -29,6 +29,11 @@ YNL031C: listed under From YBR010W (Entry P61830)
 ## clean_fasta.bash
 
 Order to run scripts:
+# TODO update to put the -m (Python puts the current directory on sys.path instead of the script’s directory)
+python -m scripts.prep_data.prep_data
+...
+python -m scripts.models.baselines --split smart
+
 1) run prep_data.py
 2) run get_yorf_to_accession_mapping.py
 3) run bash clean_fasta.bash

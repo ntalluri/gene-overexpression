@@ -21,3 +21,15 @@ Leakage for this run specifically, from leakage_threshold.tsv:
 train vs val	2.98%	0.00%
 train vs test	3.50%	0.00%
 val vs test	1.43%	0.00%
+
+
+But after adding and removing the weird cases, we are left:
+train   41433 rows   2950 genes
+val      7855 rows    560 genes
+test     8213 rows    585 genes
+
+gene counts
+train   2950 genes  (72.0%)
+val      560 genes  (13.7%)
+test     585 genes  (14.3%)
+total   4095 genes

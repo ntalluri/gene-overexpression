@@ -35,6 +35,9 @@ PROTEIN_GROUPS = {
 # duplicated. Both entries must be in the same split, then one copy is dropped.
 ONE_GENE_TWO_ENTRIES = ["YNL015W", "YNL067W-B"]
 
+# we should have 2950 genes in train after dealing with these weird cases because we remove 2 and add 3
+
+
 # data
 fitness_scores = pd.read_csv("data/oe/prepped/long_fitness_scores.csv", sep="\t") # comes from running prep_data.py
 mapping = pd.read_csv("data/genes/prepped/mapping_from_yorf_filtered_to_uniprot.tsv", sep="\t") # comes from running get_yorf_to_accession_mapping.py
@@ -67,7 +70,7 @@ for gene in ONE_GENE_TWO_ENTRIES:
 
 before = len(df)
 df = df.drop_duplicates(subset=["UID", "strain"], keep="first")
-print(f"dropped {before - len(df)} duplicate gene-strain rows")
+print(f"dropped {before - len(df)} duplicate gene-strain rows (these are the one gene two entry rows)") 
 
 # a gene split across sets is leakage no similarity check would catch
 assert df.groupby("UID").Split.nunique().max() == 1
@@ -78,3 +81,16 @@ for s in ("train", "val", "test"):
     part = df[df.Split == s]
     part[["UID", "strain", "fitness_score", "Split"]].to_csv(f"{SPLIT_OUT_DIR}/{s}_smart.tsv", sep="\t", index=False)
     print(f"{s:6} {len(part):6} rows  {part.UID.nunique():5} genes")
+
+# gene counts per split
+gene_counts = df.groupby("Split").UID.nunique()
+total = df.UID.nunique()
+
+print("\ngene counts")
+for s in ("train", "val", "test"):
+    n = int(gene_counts.get(s, 0))
+    print(f"{s:6} {n:5} genes  ({n / total:.1%})")
+print(f"{'total':6} {total:5} genes")
+
+# a gene belongs to exactly one split, so the parts must sum to the whole
+assert int(gene_counts.sum()) == total

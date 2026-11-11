@@ -17,3 +17,5 @@ investigate/raw_data/.DS_Store
 config/
 885-class-project/output/
 yeastproject.excalidraw
+*__pycache__
+.vscode

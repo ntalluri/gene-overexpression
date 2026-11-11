@@ -201,4 +201,3 @@ print()
 print(weight_table(gene_levels, m_add.coef_[:n_gene], m_add.intercept_,
                    "UID", "gene mean diff", g_means - g_means[0])
       .head(10).to_string(index=False))
-
